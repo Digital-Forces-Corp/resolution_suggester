@@ -18,7 +18,7 @@ static class ProcessRunner
             CreateNoWindow = true,
         };
 
-        using var process = Process.Start(psi)!;
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException($"Failed to start process: {exePath}");
 
         if (stdinInput != null)
         {
@@ -30,16 +30,20 @@ static class ProcessRunner
             process.StandardInput.Close();
         }
 
-        // Read stderr asynchronously to avoid pipe-buffer deadlock
+        // Read both streams asynchronously to avoid pipe-buffer deadlock
         var stderrTask = Task.Run(() => process.StandardError.ReadToEnd());
-        string stdout = process.StandardOutput.ReadToEnd();
-        string stderr = stderrTask.Result;
+        var stdoutTask = Task.Run(() => process.StandardOutput.ReadToEnd());
 
         if (!process.WaitForExit(timeoutMs))
         {
             process.Kill();
-            throw new TimeoutException($"Process timed out after {timeoutMs}ms. stdout so far: {stdout}");
+            process.WaitForExit();
+            throw new TimeoutException($"Process timed out after {timeoutMs}ms");
         }
+        process.WaitForExit(); // flush async buffers
+
+        string stdout = stdoutTask.Result;
+        string stderr = stderrTask.Result;
 
         return new RunResult(process.ExitCode, stdout, stderr);
     }

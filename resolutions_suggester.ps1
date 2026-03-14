@@ -391,7 +391,11 @@ public class MonitorResolutions
         }
 
         uint dpiX, dpiY;
-        GetDpiForMonitor(monitorHandle, 0, out dpiX, out dpiY); // MDT_EFFECTIVE_DPI
+        int dpiResult = GetDpiForMonitor(monitorHandle, 0, out dpiX, out dpiY); // MDT_EFFECTIVE_DPI
+        if (dpiResult != 0)
+        {
+            return new DisplayResult { Error = string.Format("ERROR: GetDpiForMonitor failed with HRESULT 0x{0:X8}.", dpiResult) };
+        }
         double dpiScale = dpiX / 96.0;
         double chromeWidth = chrome_width_96dpi * dpiScale;
         double chromeHeight = chrome_height_96dpi * dpiScale;
@@ -493,7 +497,8 @@ if (-not ($typeName -as [type])) {
     Add-Type -TypeDefinition $source -Language CSharp -ReferencedAssemblies System.Linq, System.Collections, System.Drawing.Primitives, System.Console
 }
 
-$result = Invoke-Expression "[$typeName]::GetMonitorData($rdpWidth, $rdpHeight)"
+$type = $typeName -as [type]
+$result = $type::GetMonitorData($rdpWidth, $rdpHeight)
 if ($result.Error) {
     Write-Host $result.Error
     exit 1

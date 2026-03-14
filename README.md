@@ -47,7 +47,7 @@ resolution_suggester server.rdp         # interactive: choose monitor resolution
 resolution_suggester C:\Users\me\rdp\   # interactive: choose monitor resolution, L/R position, and .rdp file
 ```
 
-`--rdp-resolution` / `-r` accepts `WxH` format. Default is `800x600`. The PowerShell script uses `-r` the same way.
+`--rdp-resolution` / `-r` accepts `WxH` format. Default is `800x600`. `-r` with no argument opens an interactive picker to select from common RDP resolutions. The PowerShell script uses `-r` the same way.
 
 When `.rdp` file paths or directories are passed, the program enters interactive mode. It numbers each monitor resolution in the output, then prompts to choose a monitor resolution, an `.rdp` file (if multiple), and left/right window position. The selected `winposstr`, RDP resolution, and display settings are written directly into the `.rdp` file.
 
@@ -97,10 +97,10 @@ winposstr:s:0,1,0,0,814,637
 
 The program:
 
-1. Calls `SetProcessDpiAwareness` to enable DPI awareness (per-monitor v2 if available, otherwise system DPI aware)
+1. Calls `SetProcessDpiAwareness` with `PROCESS_PER_MONITOR_DPI_AWARE` to enable per-monitor DPI awareness
 2. Identifies the current monitor using `MonitorFromWindow` on the console window handle
 3. Reads current display settings and DPI via `EnumDisplaySettings` and `GetDpiForMonitor`
-4. Enumerates all display modes for that monitor, filtering to same aspect ratio (within 0.1%), same refresh rate, and minimum height to fit at least one RDP session plus window borders and title bar
+4. Enumerates all display modes for that monitor, filtering to same aspect ratio (ratio difference < 0.001), same refresh rate, and minimum height to fit at least one RDP session plus window borders and title bar
 5. Computes the maximum integer zoom factor each monitor resolution supports (largest N where N \* base height + decoration height <= monitor resolution height, capped at 2)
 6. Calculates area usage percentages and ranks results
 

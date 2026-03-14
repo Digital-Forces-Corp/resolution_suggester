@@ -16,8 +16,7 @@ static class Assertions
         TestCase.PictRow row,
         ProcessRunner.RunResult result,
         string tempDir,
-        MonitorOracle.MonitorData? realMonitor,
-        string impl = "csharp")
+        MonitorOracle.MonitorData? realMonitor)
     {
         var results = new List<AssertResult>();
 
@@ -241,12 +240,6 @@ static class Assertions
 
         string[] lines = File.ReadAllLines(targetFile, Encoding.Unicode);
 
-        // Compute expected winposstr
-        int dpi = row.Monitor == "real" ? 96 : SyntheticMonitor.All[row.Monitor].Dpi; // real monitor DPI handled separately
-        double dpiScale = dpi / 96.0;
-        double chromeW = ChromeWidth96Dpi * dpiScale;
-        double chromeH = ChromeHeight96Dpi * dpiScale;
-
         // For the selected monitor resolution, we need to know which mode was selected.
         // Parse the selection from stdout to get the mode dimensions.
         // (Simplified: for one_window pick first option, for two_window pick first two-window option)
@@ -316,12 +309,15 @@ static class Assertions
             int widthUsage = (int)Math.Round(winWidth / modeW * 100);
             int widthUsageTwo = (int)Math.Round(2 * winWidth / modeW * 100);
             int heightUsage = (int)Math.Round(winHeight / modeH * 100);
-            int areaOne = widthUsage * heightUsage / 100;
-            int areaTwo = Math.Min(widthUsageTwo, 100) * heightUsage / 100;
+            int areaOne = (int)Math.Round(widthUsage * heightUsage / 100.0);
+            int areaTwo = (int)Math.Round(Math.Min(widthUsageTwo, 100) * heightUsage / 100.0);
             monitorResolutions.Add((modeW, modeH, zoom, areaOne, areaTwo));
         }
 
         // Sort and pick the selected monitor resolution
+        if (monitorResolutions.Count == 0)
+            return "[ERROR: no modes passed filtering for winposstr computation]";
+
         (int selW, int selH, int selZoom, int, int) selectedMode;
         if (row.MonitorResSel == "one_window")
         {

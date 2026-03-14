@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 // Find the exe and PS1: build first, then locate in bin
 string projectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
 string repoRoot = Path.GetFullPath(Path.Combine(projectDir, ".."));
-string exePath = Path.Combine(repoRoot, "src", "bin", "Debug", "net8.0-windows", "win-x64", "resolution_suggester.exe");
+string exePath = Path.Combine(repoRoot, "src", "bin", "Release", "net8.0-windows", "win-x64", "resolution_suggester.exe");
 string ps1Path = Path.Combine(repoRoot, "resolutions_suggester.ps1");
 string tsvPath = Path.Combine(projectDir, "pairwise-output.tsv");
 
@@ -97,7 +97,7 @@ static int RunTestSuite(
             if (stdin != null && stdin.Contains("TWO_WINDOW_FIRST"))
             {
                 string dryArgs = TestCase.BuildCliArgs(row with { FileCount = "zero" }, tempDir, impl);
-                string? dryStdin = row.ResolutionArg == "picker" ? "3\n" : null;
+                string? dryStdin = row.ResolutionArg == "picker" ? TestCase.PickerSelection + "\n" : null;
                 var dryResult = RunImpl(impl, exePath, ps1Path, dryArgs, dryStdin);
                 int oneWindowCount = CountOptionLines(dryResult.Stdout, "1 RDP");
                 stdin = stdin.Replace("TWO_WINDOW_FIRST", (oneWindowCount + 1).ToString());
@@ -107,7 +107,7 @@ static int RunTestSuite(
             var result = RunImpl(impl, exePath, ps1Path, cliArgs, stdin);
 
             // Assert
-            var assertResults = Assertions.AssertAll(row, result, tempDir, realMonitor, impl);
+            var assertResults = Assertions.AssertAll(row, result, tempDir, realMonitor);
             var failedAsserts = assertResults.Where(r => !r.Passed).ToList();
 
             if (failedAsserts.Count == 0)
@@ -167,7 +167,7 @@ static ProcessRunner.RunResult RunImpl(string impl, string exePath, string ps1Pa
 
 static int CountOptionLines(string stdout, string sectionMarker)
 {
-    var lines = stdout.Split('\n');
+    var lines = stdout.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
     bool inSection = false;
     int count = 0;
     foreach (string line in lines)
@@ -177,7 +177,7 @@ static int CountOptionLines(string stdout, string sectionMarker)
             inSection = true;
             continue;
         }
-        if (inSection && line.TrimStart().StartsWith("---"))
+        if (inSection && line.Trim().StartsWith("---"))
             break;
         if (inSection && line.Trim().Length > 0)
             count++;

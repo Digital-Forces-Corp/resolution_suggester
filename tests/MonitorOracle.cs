@@ -33,11 +33,8 @@ static class MonitorOracle
     [DllImport("user32.dll")]
     static extern bool EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
 
-    [DllImport("kernel32.dll")]
-    static extern IntPtr GetConsoleWindow();
-
     [DllImport("user32.dll")]
-    static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+    static extern IntPtr MonitorFromPoint(long pt, uint dwFlags);
 
     [DllImport("shcore.dll")]
     static extern int SetProcessDpiAwareness(int awareness);
@@ -53,8 +50,7 @@ static class MonitorOracle
     public static MonitorData GetCurrentMonitor()
     {
         SetProcessDpiAwareness(2);
-        IntPtr consoleHandle = GetConsoleWindow();
-        IntPtr monitorHandle = MonitorFromWindow(consoleHandle, 2);
+        IntPtr monitorHandle = MonitorFromPoint(0, 1); // MONITOR_DEFAULTTOPRIMARY — matches subprocess with no console window
 
         var monitorInfo = new MONITORINFOEX();
         monitorInfo.cbSize = Marshal.SizeOf(monitorInfo);
@@ -65,7 +61,9 @@ static class MonitorOracle
         if (!EnumDisplaySettings(monitorInfo.szDevice, -1, ref devMode))
             throw new Exception("Failed to get display settings");
 
-        GetDpiForMonitor(monitorHandle, 0, out uint dpiX, out _);
+        int hr = GetDpiForMonitor(monitorHandle, 0, out uint dpiX, out _);
+        if (hr != 0)
+            throw new Exception($"GetDpiForMonitor failed with HRESULT 0x{hr:X8}");
 
         int gcd = Gcd(devMode.dmPelsWidth, devMode.dmPelsHeight);
         string ratio = $"{devMode.dmPelsWidth / gcd}:{devMode.dmPelsHeight / gcd}";

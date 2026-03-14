@@ -20,8 +20,7 @@ jobs:
 
       - name: Build and test
         run: |
-          dotnet build src/resolution_suggester.csproj
-          dotnet build tests/ResolutionSuggesterTests.csproj
+          dotnet build src/resolution_suggester.csproj -c Release
           dotnet run --project tests/ResolutionSuggesterTests.csproj
 
       - name: Publish
@@ -33,13 +32,13 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@c062e08bd532815e2082a1c180f2aa45f82c0b72 # v2
         with:
           files: publish/resolution_suggester.exe
           generate_release_notes: true
 
       - name: Submit to winget
-        uses: vedantmgoyal9/winget-releaser@v2
+        uses: vedantmgoyal9/winget-releaser@a507e50fd7dd7c27a3770a07e1bab6c1aa2e3dfa # v2
         with:
           identifier: DigitalForcesCorp.ResolutionSuggester
           version: ${{ steps.version.outputs.version }}

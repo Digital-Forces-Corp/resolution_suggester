@@ -1,5 +1,3 @@
-using System.Text;
-
 static class FixtureManager
 {
     static readonly string FixturesDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "fixtures");
@@ -41,6 +39,6 @@ static class FixtureManager
 
     public static void Cleanup(string tempDir)
     {
-        try { Directory.Delete(tempDir, true); } catch { }
+        try { Directory.Delete(tempDir, true); } catch (Exception ex) { Console.Error.WriteLine($"WARNING: Failed to delete temp dir {tempDir}: {ex.Message}"); }
     }
 }

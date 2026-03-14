@@ -1,5 +1,7 @@
 static class TestCase
 {
+    public const string PickerSelection = "3"; // entry 3 = 1280x720
+
     public record PictRow(
         string Monitor,
         string ResolutionArg,
@@ -90,7 +92,7 @@ static class TestCase
 
         // Picker: resolution selection comes first
         if (row.ResolutionArg == "picker")
-            parts.Add("3"); // entry 3 = 1280x720
+            parts.Add(PickerSelection); // entry 3 = 1280x720
 
         // Monitor resolution selection (prompt order: monitor resolution, file, side)
         switch (row.MonitorResSel)

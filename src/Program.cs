@@ -36,7 +36,7 @@ for (int argIndex = 0; argIndex < args.Length; argIndex++)
         Console.WriteLine("                     winposstr and RDP resolution settings in the .rdp file");
         return 0;
     }
-    else if ((args[argIndex] == "--rdp-resolution" || args[argIndex] == "-r") && argIndex + 1 >= args.Length)
+    else if ((args[argIndex] == "--rdp-resolution" || args[argIndex] == "-r") && (argIndex + 1 >= args.Length || args[argIndex + 1].StartsWith("--") || args[argIndex + 1] == "-h"))
     {
         var commonRdpResolutions = new (int W, int H, string Ratio, string Name)[]
         {
@@ -78,6 +78,11 @@ for (int argIndex = 0; argIndex < args.Length; argIndex++)
         string[] parts = args[argIndex].Split('x');
         if (parts.Length == 1 && int.TryParse(parts[0], out rdpWidth))
         {
+            if (rdpWidth <= 0)
+            {
+                Console.WriteLine("RDP width must be a positive integer.");
+                return 1;
+            }
             rdpHeight = 0; // derive from monitor aspect ratio after detection
         }
         else if (parts.Length == 2 && int.TryParse(parts[0], out rdpWidth) && parts[1].Contains(':'))
@@ -93,10 +98,20 @@ for (int argIndex = 0; argIndex < args.Length; argIndex++)
                 Console.WriteLine("Invalid aspect ratio. Use N:D (e.g. 16:9, 4:3).");
                 return 1;
             }
+            if (rdpWidth <= 0 || rdpHeight <= 0)
+            {
+                Console.WriteLine("RDP width and height must be positive integers.");
+                return 1;
+            }
         }
         else if (parts.Length != 2 || !int.TryParse(parts[0], out rdpWidth) || !int.TryParse(parts[1], out rdpHeight))
         {
             Console.WriteLine("Invalid RDP resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3).");
+            return 1;
+        }
+        else if (rdpWidth <= 0 || rdpHeight <= 0)
+        {
+            Console.WriteLine("RDP width and height must be positive integers.");
             return 1;
         }
     }
@@ -217,7 +232,12 @@ else
         return 1;
     }
 
-    NativeMethods.GetDpiForMonitor(monitorHandle, 0, out uint dpiX, out _); // MDT_EFFECTIVE_DPI
+    int dpiResult = NativeMethods.GetDpiForMonitor(monitorHandle, 0, out uint dpiX, out _); // MDT_EFFECTIVE_DPI
+    if (dpiResult != 0)
+    {
+        Console.WriteLine($"ERROR: GetDpiForMonitor failed with HRESULT 0x{dpiResult:X8}.");
+        return 1;
+    }
     dpiScale = dpiX / 96.0;
     chromeWidth = ChromeWidth96Dpi * dpiScale;
     chromeHeight = ChromeHeight96Dpi * dpiScale;
@@ -289,8 +309,8 @@ foreach (var mode in modes)
         WidthUsage = widthUsage,
         WidthUsageTwo = widthUsageTwo,
         HeightUsage = heightUsage,
-        AreaOnePercent = areaOne / 100,
-        AreaTwoPercent = areaTwo / 100,
+        AreaOnePercent = (int)Math.Round(areaOne / 100.0),
+        AreaTwoPercent = (int)Math.Round(areaTwo / 100.0),
         IsCurrent = mode.Width == currentWidth && mode.Height == currentHeight
     });
 }
@@ -439,15 +459,15 @@ static int Gcd(int a, int b)
 
 class MonitorResolution
 {
-    public int Width;
-    public int Height;
-    public int ZoomFactor;
-    public int WidthUsage;
-    public int WidthUsageTwo;
-    public int HeightUsage;
-    public int AreaOnePercent;
-    public int AreaTwoPercent;
-    public bool IsCurrent;
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public int ZoomFactor { get; set; }
+    public int WidthUsage { get; set; }
+    public int WidthUsageTwo { get; set; }
+    public int HeightUsage { get; set; }
+    public int AreaOnePercent { get; set; }
+    public int AreaTwoPercent { get; set; }
+    public bool IsCurrent { get; set; }
 }
 
 static class NativeMethods
@@ -491,7 +511,10 @@ static class NativeMethods
 
     public struct RECT
     {
-        public int left, top, right, bottom;
+        public int left;
+        public int top;
+        public int right;
+        public int bottom;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
