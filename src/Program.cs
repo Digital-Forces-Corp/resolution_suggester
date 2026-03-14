@@ -14,6 +14,8 @@ const double ChromeHeight96Dpi = 55.0 / 1.5;
 int rdpWidth = 800;
 int rdpHeight = 600;
 var pathArgs = new List<string>();
+string? testMonitor = null;
+string? testModes = null;
 
 for (int argIndex = 0; argIndex < args.Length; argIndex++)
 {
@@ -97,6 +99,16 @@ for (int argIndex = 0; argIndex < args.Length; argIndex++)
             Console.WriteLine("Invalid resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3).");
             return 1;
         }
+    }
+    else if (args[argIndex] == "--test-monitor" && argIndex + 1 < args.Length)
+    {
+        argIndex++;
+        testMonitor = args[argIndex];
+    }
+    else if (args[argIndex] == "--test-modes" && argIndex + 1 < args.Length)
+    {
+        argIndex++;
+        testModes = args[argIndex];
     }
     else
     {
@@ -234,7 +246,7 @@ int scenarioNumber = 1;
 
 // Display 1-window scenarios sorted by area
 var oneWindowSorted = computed.OrderByDescending(r => r.AreaOnePercent).ToList();
-Console.WriteLine($"\n--- Resolutions for 1 {rdpLabel} with same ratio and frequency sorted by area used ---");
+Console.WriteLine($"\n--- Available resolutions for 1 {rdpLabel} with same ratio and frequency sorted by area used ---");
 foreach (var res in oneWindowSorted)
 {
     string marker = res.IsCurrent ? "*" : "";
@@ -246,7 +258,7 @@ foreach (var res in oneWindowSorted)
 
 // Display 2-window scenarios sorted by area
 var twoWindowSorted = computed.OrderByDescending(r => r.AreaTwoPercent).ToList();
-Console.WriteLine($"\n--- Resolutions for 2 {rdpLabel} with same ratio and frequency sorted by area used ---");
+Console.WriteLine($"\n--- Available resolutions for 2 {rdpLabel} with same ratio and frequency sorted by area used ---");
 foreach (var res in twoWindowSorted)
 {
     string marker = res.IsCurrent ? "*" : "";
