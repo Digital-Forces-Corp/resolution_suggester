@@ -1,6 +1,12 @@
 static class FixtureManager
 {
-    static readonly string FixturesDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "fixtures");
+    public const string FileCountOne = "one";
+    public const string FileCountTwo = "two";
+    public const string FileCountDirectory = "directory";
+    public const string FileCountNonexistent = "nonexistent";
+    public const string FileCountZero = "zero";
+
+    static readonly string FixturesDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "fixtures"));
 
     public static string SetupTempDir(string rdpSettings, string fileCount)
     {
@@ -15,9 +21,12 @@ static class FixtureManager
             _ => throw new ArgumentException($"Unknown RdpSettings: {rdpSettings}")
         };
 
+        if (fileCount == FileCountNonexistent || fileCount == FileCountZero)
+            return tempDir;
+
         string sourceFile = Path.Combine(FixturesDir, fixtureFile);
 
-        if (fileCount == "directory")
+        if (fileCount == FileCountDirectory)
         {
             string subdir = Path.Combine(tempDir, "testdir");
             Directory.CreateDirectory(subdir);
@@ -27,14 +36,20 @@ static class FixtureManager
             return tempDir;
         }
 
-        File.Copy(sourceFile, Path.Combine(tempDir, "test1.rdp"));
-
-        if (fileCount == "two")
+        if (fileCount == FileCountOne)
         {
-            File.Copy(Path.Combine(FixturesDir, "test2.rdp"), Path.Combine(tempDir, "test2.rdp"));
+            File.Copy(sourceFile, Path.Combine(tempDir, "test1.rdp"));
+            return tempDir;
         }
 
-        return tempDir;
+        if (fileCount == FileCountTwo)
+        {
+            File.Copy(sourceFile, Path.Combine(tempDir, "test1.rdp"));
+            File.Copy(Path.Combine(FixturesDir, "test2.rdp"), Path.Combine(tempDir, "test2.rdp"));
+            return tempDir;
+        }
+
+        throw new ArgumentException($"Unknown fileCount: {fileCount}");
     }
 
     public static void Cleanup(string tempDir)

@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
+    <!-- Safe: all P/Invoke uses static [DllImport] with system DLLs (user32, kernel32, shcore), which the trimmer preserves. -->
     <PublishTrimmed>true</PublishTrimmed>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>resolution_suggester</AssemblyName>

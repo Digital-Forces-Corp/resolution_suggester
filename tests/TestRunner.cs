@@ -1,5 +1,8 @@
 using System.Text.RegularExpressions;
 
+const string ImplCSharp = "csharp";
+const string ImplPs1 = "ps1";
+
 // Find the exe and PS1: build first, then locate in bin
 string projectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
 string repoRoot = Path.GetFullPath(Path.Combine(projectDir, ".."));
@@ -47,12 +50,12 @@ int totalFailed = 0;
 // Run tests against C# exe
 Console.WriteLine();
 Console.WriteLine("=== C# implementation ===");
-totalFailed += RunTestSuite("csharp", rows, realMonitor, exePath, ps1Path, tsvPath);
+totalFailed += RunTestSuite(ImplCSharp, rows, realMonitor, exePath, ps1Path, tsvPath);
 
 // Run tests against PS1 script
 Console.WriteLine();
 Console.WriteLine("=== PowerShell implementation ===");
-totalFailed += RunTestSuite("ps1", rows, realMonitor, exePath, ps1Path, tsvPath);
+totalFailed += RunTestSuite(ImplPs1, rows, realMonitor, exePath, ps1Path, tsvPath);
 
 return totalFailed > 0 ? 1 : 0;
 
@@ -99,6 +102,8 @@ static int RunTestSuite(
                 string dryArgs = TestCase.BuildCliArgs(row with { FileCount = "zero" }, tempDir, impl);
                 string? dryStdin = row.ResolutionArg == "picker" ? TestCase.PickerSelection + "\n" : null;
                 var dryResult = RunImpl(impl, exePath, ps1Path, dryArgs, dryStdin);
+                if (dryResult.ExitCode != 0)
+                    throw new InvalidOperationException($"Dry-run exited with code {dryResult.ExitCode}: {dryResult.Stderr}");
                 int oneWindowCount = CountOptionLines(dryResult.Stdout, "1 RDP");
                 stdin = stdin.Replace("TWO_WINDOW_FIRST", (oneWindowCount + 1).ToString());
             }
@@ -128,6 +133,8 @@ static int RunTestSuite(
         {
             Console.WriteLine($"  ERROR {label}: {ex.Message}");
             failed++;
+            var errorResult = new Assertions.AssertResult(false, ex.ToString());
+            failures.Add((i + 1, row, new List<Assertions.AssertResult> { errorResult }));
         }
         finally
         {
@@ -156,7 +163,7 @@ static int RunTestSuite(
 
 static ProcessRunner.RunResult RunImpl(string impl, string exePath, string ps1Path, string args, string? stdin)
 {
-    if (impl == "ps1")
+    if (impl == ImplPs1)
     {
         // PowerShell -File mode: args are treated literally (no @ splatting issues),
         // Write-Host output goes to stdout when captured via ProcessStartInfo
@@ -169,12 +176,14 @@ static int CountOptionLines(string stdout, string sectionMarker)
 {
     var lines = stdout.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
     bool inSection = false;
+    bool sectionFound = false;
     int count = 0;
     foreach (string line in lines)
     {
         if (line.Contains($"--- Available monitor resolutions for {sectionMarker}"))
         {
             inSection = true;
+            sectionFound = true;
             continue;
         }
         if (inSection && line.Trim().StartsWith("---"))
@@ -182,5 +191,7 @@ static int CountOptionLines(string stdout, string sectionMarker)
         if (inSection && line.Trim().Length > 0)
             count++;
     }
+    if (!sectionFound)
+        throw new InvalidOperationException($"Section marker '{sectionMarker}' not found in output");
     return count;
 }

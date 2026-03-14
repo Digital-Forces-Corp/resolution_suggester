@@ -22,6 +22,8 @@ static class TestCase
             string line = lines[i].Trim();
             if (line.Length == 0) continue;
             string[] cols = line.Split('\t');
+            if (cols.Length < 7)
+                throw new InvalidDataException($"Line {i + 1}: expected 7 columns, got {cols.Length}. Raw line: {line}");
             rows.Add(new PictRow(cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6]));
         }
         return rows;
@@ -51,25 +53,30 @@ static class TestCase
             case "invalid_ratio": args.Add("-r 1280x0:0"); break;
             // "picker" added after file paths below
             // "default": no -r flag
+            case "picker": break;
+            case "default": break;
+            default: throw new InvalidOperationException($"Unknown ResolutionArg value: {row.ResolutionArg}");
         }
 
         // File paths
         switch (row.FileCount)
         {
-            case "one":
+            case FixtureManager.FileCountOne:
                 args.Add($"\"{Path.Combine(tempDir, "test1.rdp")}\"");
                 break;
-            case "two":
+            case FixtureManager.FileCountTwo:
                 args.Add($"\"{Path.Combine(tempDir, "test1.rdp")}\"");
                 args.Add($"\"{Path.Combine(tempDir, "test2.rdp")}\"");
                 break;
-            case "directory":
+            case FixtureManager.FileCountDirectory:
                 args.Add($"\"{Path.Combine(tempDir, "testdir")}\"");
                 break;
-            case "nonexistent":
+            case FixtureManager.FileCountNonexistent:
                 args.Add($"\"{Path.Combine(tempDir, "nonexistent.rdp")}\"");
                 break;
-            // "zero": no file args
+            // FileCountZero: no file args
+            case FixtureManager.FileCountZero: break;
+            default: throw new InvalidOperationException($"Unknown FileCount value: {row.FileCount}");
         }
 
         // Picker must come after file paths so arg parser sees -r as last arg (no next value)
@@ -85,7 +92,7 @@ static class TestCase
         if (row.ResolutionArg == "help" || row.ResolutionArg == "invalid_format" || row.ResolutionArg == "invalid_ratio")
             return null;
         // Zero files with no picker means non-interactive (no stdin needed)
-        if (row.FileCount == "zero" && row.ResolutionArg != "picker")
+        if (row.FileCount == FixtureManager.FileCountZero && row.ResolutionArg != "picker")
             return null;
 
         var parts = new List<string>();
@@ -105,6 +112,7 @@ static class TestCase
                 parts.Add("TWO_WINDOW_FIRST");
                 break;
             case "invalid_selection": parts.Add("999"); break;
+            default: throw new InvalidOperationException($"Unknown MonitorResSel value: {row.MonitorResSel}");
         }
 
         // Invalid selection exits early — no more prompts
@@ -112,13 +120,14 @@ static class TestCase
             return string.Join("\n", parts) + "\n";
 
         // File selection (only prompted when 2+ files)
-        if (row.FileCount == "two" || row.FileCount == "directory")
+        if (row.FileCount == FixtureManager.FileCountTwo || row.FileCount == FixtureManager.FileCountDirectory)
         {
             switch (row.FileSel)
             {
                 case "first": parts.Add("1"); break;
                 case "second": parts.Add("2"); break;
                 case "invalid_file": parts.Add("999"); break;
+                default: throw new InvalidOperationException($"Unknown FileSel value: {row.FileSel}");
             }
 
             // Invalid file exits early
@@ -132,6 +141,7 @@ static class TestCase
             case "L": parts.Add("L"); break;
             case "R": parts.Add("R"); break;
             case "invalid_side": parts.Add("X"); break;
+            default: throw new InvalidOperationException($"Unknown Side value: {row.Side}");
         }
 
         return string.Join("\n", parts) + "\n";

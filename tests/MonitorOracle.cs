@@ -7,18 +7,46 @@ static class MonitorOracle
     {
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string dmDeviceName;
-        public short dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
-        public int dmFields, dmPositionX, dmPositionY, dmDisplayOrientation, dmDisplayFixedOutput;
-        public short dmColor, dmDuplex, dmYResolution, dmTTOption, dmCollate;
+        public short dmSpecVersion;
+        public short dmDriverVersion;
+        public short dmSize;
+        public short dmDriverExtra;
+        public int dmFields;
+        public int dmPositionX;
+        public int dmPositionY;
+        public int dmDisplayOrientation;
+        public int dmDisplayFixedOutput;
+        public short dmColor;
+        public short dmDuplex;
+        public short dmYResolution;
+        public short dmTTOption;
+        public short dmCollate;
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string dmFormName;
         public short dmLogPixels;
-        public int dmBitsPerPel, dmPelsWidth, dmPelsHeight, dmDisplayFlags, dmDisplayFrequency;
-        public int dmICMMethod, dmICMIntent, dmMediaType, dmDitherType;
-        public int dmReserved1, dmReserved2, dmPanningWidth, dmPanningHeight;
+        public int dmBitsPerPel;
+        public int dmPelsWidth;
+        public int dmPelsHeight;
+        public int dmDisplayFlags;
+        public int dmDisplayFrequency;
+        public int dmICMMethod;
+        public int dmICMIntent;
+        public int dmMediaType;
+        public int dmDitherType;
+        public int dmReserved1;
+        public int dmReserved2;
+        public int dmPanningWidth;
+        public int dmPanningHeight;
     }
 
-    public struct RECT { public int left, top, right, bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int left;
+        public int top;
+        public int right;
+        public int bottom;
+    }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     public struct MONITORINFOEX
@@ -33,8 +61,15 @@ static class MonitorOracle
     [DllImport("user32.dll")]
     static extern bool EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int x;
+        public int y;
+    }
+
     [DllImport("user32.dll")]
-    static extern IntPtr MonitorFromPoint(long pt, uint dwFlags);
+    static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
 
     [DllImport("shcore.dll")]
     static extern int SetProcessDpiAwareness(int awareness);
@@ -49,8 +84,10 @@ static class MonitorOracle
 
     public static MonitorData GetCurrentMonitor()
     {
-        SetProcessDpiAwareness(2);
-        IntPtr monitorHandle = MonitorFromPoint(0, 1); // MONITOR_DEFAULTTOPRIMARY — matches subprocess with no console window
+        int dpiAwarenessResult = SetProcessDpiAwareness(2);
+        if (dpiAwarenessResult != 0 && dpiAwarenessResult != unchecked((int)0x80070005)) // E_ACCESSDENIED = already set
+            throw new Exception($"SetProcessDpiAwareness failed with HRESULT 0x{dpiAwarenessResult:X8}");
+        IntPtr monitorHandle = MonitorFromPoint(new POINT { x = 0, y = 0 }, 1); // MONITOR_DEFAULTTOPRIMARY — matches subprocess with no console window
 
         var monitorInfo = new MONITORINFOEX();
         monitorInfo.cbSize = Marshal.SizeOf(monitorInfo);

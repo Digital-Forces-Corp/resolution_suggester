@@ -150,6 +150,7 @@ foreach (string pathArg in pathArgs)
 string monitorNumber;
 int currentWidth, currentHeight, currentFrequency;
 double dpiScale, chromeWidth, chromeHeight;
+double currentRatio;
 int minimumHeight;
 var seen = new HashSet<string>();
 var modes = new List<(int Width, int Height)>();
@@ -179,6 +180,7 @@ if (testMonitor != null)
         Console.WriteLine("--test-modes is required when --test-monitor is used.");
         return 1;
     }
+    currentRatio = (double)currentWidth / currentHeight;
     foreach (string modeStr in testModes.Split(','))
     {
         var modeMatch = Regex.Match(modeStr, @"^(\d+)x(\d+)(?:@(\d+)Hz)?$");
@@ -195,8 +197,7 @@ if (testMonitor != null)
         if (modeFreq == currentFrequency && modeH >= minimumHeight && modeH > 0)
         {
             double ratio = (double)modeW / modeH;
-            double currentRatioCheck = (double)currentWidth / currentHeight;
-            if (Math.Abs(ratio - currentRatioCheck) < 0.001)
+            if (Math.Abs(ratio - currentRatio) < 0.001)
             {
                 string key = $"{modeW}x{modeH}";
                 if (seen.Add(key))
@@ -209,10 +210,13 @@ if (testMonitor != null)
 }
 else
 {
-    NativeMethods.SetProcessDpiAwareness(2); // PROCESS_PER_MONITOR_DPI_AWARE
+    int dpiAwarenessResult = NativeMethods.SetProcessDpiAwareness(2); // PROCESS_PER_MONITOR_DPI_AWARE
+    if (dpiAwarenessResult != 0 && dpiAwarenessResult != unchecked((int)0x80070005)) // E_ACCESSDENIED = already set
+    {
+        Console.Error.WriteLine($"WARNING: SetProcessDpiAwareness failed with HRESULT 0x{dpiAwarenessResult:X8}.");
+    }
 
-    IntPtr consoleHandle = NativeMethods.GetConsoleWindow();
-    IntPtr monitorHandle = NativeMethods.MonitorFromWindow(consoleHandle, 2); // MONITOR_DEFAULTTONEAREST
+    IntPtr monitorHandle = NativeMethods.MonitorFromPoint(new NativeMethods.POINT { x = 0, y = 0 }, 2); // MONITOR_DEFAULTTONEAREST
 
     var monitorInfo = new NativeMethods.MONITORINFOEX();
     monitorInfo.cbSize = Marshal.SizeOf(monitorInfo);
@@ -247,6 +251,7 @@ else
     currentWidth = currentSettings.dmPelsWidth;
     currentHeight = currentSettings.dmPelsHeight;
 
+    currentRatio = (double)currentWidth / currentHeight;
     var devMode = new NativeMethods.DEVMODE();
     int modeIndex = 0;
     while (NativeMethods.EnumDisplaySettings(deviceName, modeIndex, ref devMode))
@@ -254,8 +259,7 @@ else
         if (devMode.dmDisplayFrequency == currentFrequency && devMode.dmPelsHeight >= minimumHeight && devMode.dmPelsHeight > 0)
         {
             double ratio = (double)devMode.dmPelsWidth / devMode.dmPelsHeight;
-            double currentRatioCheck = (double)currentWidth / currentHeight;
-            if (Math.Abs(ratio - currentRatioCheck) < 0.001)
+            if (Math.Abs(ratio - currentRatio) < 0.001)
             {
                 string key = $"{devMode.dmPelsWidth}x{devMode.dmPelsHeight}";
                 if (seen.Add(key))
@@ -270,7 +274,6 @@ else
 
 int ratioGcd = Gcd(currentWidth, currentHeight);
 string currentRatioDisplay = $"{currentWidth / ratioGcd}:{currentHeight / ratioGcd}";
-double currentRatio = (double)currentWidth / currentHeight;
 
 // Derive height from monitor aspect ratio when only width was specified
 if (rdpHeight == 0)
@@ -418,7 +421,21 @@ else
 }
 
 // Update the .rdp file, ensuring all documented settings are present
-var lines = File.ReadAllLines(targetPath, Encoding.Unicode).ToList();
+List<string> lines;
+try
+{
+    lines = File.ReadAllLines(targetPath, Encoding.Unicode).ToList();
+}
+catch (IOException ex)
+{
+    Console.WriteLine($"ERROR: Failed to read {targetPath}: {ex.Message}");
+    return 1;
+}
+catch (UnauthorizedAccessException ex)
+{
+    Console.WriteLine($"ERROR: Failed to read {targetPath}: {ex.Message}");
+    return 1;
+}
 
 var requiredSettings = new (string Key, string Value)[]
 {
@@ -447,7 +464,20 @@ foreach (var setting in requiredSettings)
         lines.Add(setting.Value);
 }
 
-File.WriteAllLines(targetPath, lines, Encoding.Unicode);
+try
+{
+    File.WriteAllLines(targetPath, lines, Encoding.Unicode);
+}
+catch (IOException ex)
+{
+    Console.WriteLine($"ERROR: Failed to write {targetPath}: {ex.Message}");
+    return 1;
+}
+catch (UnauthorizedAccessException ex)
+{
+    Console.WriteLine($"ERROR: Failed to write {targetPath}: {ex.Message}");
+    return 1;
+}
 Console.WriteLine($"Updated {targetPath} with {winposstr}");
 return 0;
 
@@ -509,12 +539,20 @@ static class NativeMethods
         public int dmPanningHeight;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
     public struct RECT
     {
         public int left;
         public int top;
         public int right;
         public int bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int x;
+        public int y;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
@@ -531,11 +569,8 @@ static class NativeMethods
     [DllImport("user32.dll")]
     public static extern bool EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
 
-    [DllImport("kernel32.dll")]
-    public static extern IntPtr GetConsoleWindow();
-
     [DllImport("user32.dll")]
-    public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+    public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
 
     [DllImport("shcore.dll")]
     public static extern int SetProcessDpiAwareness(int awareness);

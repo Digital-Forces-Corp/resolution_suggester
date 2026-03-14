@@ -37,11 +37,12 @@ static class ProcessRunner
         if (!process.WaitForExit(timeoutMs))
         {
             process.Kill();
-            process.WaitForExit();
+            process.WaitForExit(timeoutMs);
+            Task.WaitAll(new[] { stdoutTask, stderrTask }, 2000);
             throw new TimeoutException($"Process timed out after {timeoutMs}ms");
         }
-        process.WaitForExit(); // flush async buffers
 
+        // .Result blocks until EOF is reached (which happens when the process exits)
         string stdout = stdoutTask.Result;
         string stderr = stderrTask.Result;
 

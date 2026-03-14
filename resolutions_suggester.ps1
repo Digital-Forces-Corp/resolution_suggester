@@ -4,6 +4,8 @@ param(
 )
 
 $MaxZoom = 2
+$ChromeHeightAt96Dpi = 55.0 / 1.5
+$ChromeWidthAt96Dpi = 14.0
 
 # Parse arguments: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [--help] [paths...]
 $rdpWidth = 800
@@ -31,7 +33,7 @@ while ($argIndex -lt $InputArgs.Count) {
         Write-Host "                     winposstr and RDP resolution settings in the .rdp file"
         return
     }
-    elseif (($arg -eq '--rdp-resolution' -or $arg -eq '-r') -and ($argIndex + 1 -ge $InputArgs.Count)) {
+    elseif (($arg -eq '--rdp-resolution' -or $arg -eq '-r') -and (($argIndex + 1 -ge $InputArgs.Count) -or ($InputArgs[$argIndex + 1].StartsWith('--')) -or ($InputArgs[$argIndex + 1] -eq '-h'))) {
         $commonRdpResolutions = @(
             @{ W = 800;  H = 600;  Ratio = '4:3';   Name = 'SVGA' }
             @{ W = 1024; H = 768;  Ratio = '4:3';   Name = 'XGA' }
@@ -53,9 +55,9 @@ while ($argIndex -lt $InputArgs.Count) {
         for ($resIndex = 0; $resIndex -lt $commonRdpResolutions.Count; $resIndex++) {
             $resItem = $commonRdpResolutions[$resIndex]
             $num = ($resIndex + 1).ToString().PadLeft(2)
-            $heightStr = "$($resItem.W)x$($resItem.H)"
+            $resolutionStr = "$($resItem.W)x$($resItem.H)"
             $ratioStr = $resItem.Ratio
-            Write-Host "  $num. $($heightStr.PadRight(10)) $($ratioStr.PadRight(6)) $($resItem.Name)"
+            Write-Host "  $num. $($resolutionStr.PadRight(10)) $($ratioStr.PadRight(6)) $($resItem.Name)"
         }
         Write-Host "Select RDP resolution: " -NoNewline
         $resChoice = [Console]::In.ReadLine()
@@ -74,6 +76,10 @@ while ($argIndex -lt $InputArgs.Count) {
             $widthVal = 0
             if ([int]::TryParse($parts[0], [ref]$widthVal)) {
                 $rdpWidth = $widthVal
+                if ($rdpWidth -le 0) {
+                    Write-Host "RDP width must be a positive integer."
+                    exit 1
+                }
                 $rdpHeight = 0  # derive from monitor aspect ratio after detection
             }
             else {
@@ -98,6 +104,10 @@ while ($argIndex -lt $InputArgs.Count) {
                 Write-Host "Invalid aspect ratio. Use N:D (e.g. 16:9, 4:3)."
                 exit 1
             }
+            if ($rdpWidth -le 0 -or $rdpHeight -le 0) {
+                Write-Host "RDP width and height must be positive integers."
+                exit 1
+            }
         }
         elseif ($parts.Count -eq 2) {
             $wVal = 0
@@ -105,6 +115,10 @@ while ($argIndex -lt $InputArgs.Count) {
             if ([int]::TryParse($parts[0], [ref]$wVal) -and [int]::TryParse($parts[1], [ref]$hVal)) {
                 $rdpWidth = $wVal
                 $rdpHeight = $hVal
+                if ($rdpWidth -le 0 -or $rdpHeight -le 0) {
+                    Write-Host "RDP width and height must be positive integers."
+                    exit 1
+                }
             }
             else {
                 Write-Host "Invalid RDP resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
@@ -120,9 +134,17 @@ while ($argIndex -lt $InputArgs.Count) {
         $argIndex++
         $testMonitor = $InputArgs[$argIndex]
     }
+    elseif ($arg -eq '--test-monitor') {
+        Write-Host "--test-monitor requires a value (WxH@FHz@Ddpi)."
+        exit 1
+    }
     elseif ($arg -eq '--test-modes' -and $argIndex + 1 -lt $InputArgs.Count) {
         $argIndex++
         $testModes = $InputArgs[$argIndex]
+    }
+    elseif ($arg -eq '--test-modes') {
+        Write-Host "--test-modes requires a value (WxH,WxH@FHz,...)."
+        exit 1
     }
     else {
         $pathArgs += $arg
@@ -154,8 +176,8 @@ if ($testMonitor) {
     $currentFrequency = [int]$Matches[3]
     $dpiX = [int]$Matches[4]
     $dpiScale = $dpiX / 96.0
-    $chromeWidth = 14.0 * $dpiScale
-    $chromeHeight = (55.0 / 1.5) * $dpiScale
+    $chromeWidth = $ChromeWidthAt96Dpi * $dpiScale
+    $chromeHeight = $ChromeHeightAt96Dpi * $dpiScale
     $minimumHeight = [int][Math]::Ceiling($rdpHeight + $chromeHeight)
     $monitorNumber = "#0"
 
@@ -226,8 +248,8 @@ if ($testMonitor) {
             WidthUsage = $widthUsage
             WidthUsageTwo = $widthUsageTwo
             HeightUsage = $heightUsage
-            AreaOnePercent = [int][Math]::Truncate($areaOne / 100)
-            AreaTwoPercent = [int][Math]::Truncate($areaTwo / 100)
+            AreaOnePercent = [int][Math]::Round($areaOne / 100.0)
+            AreaTwoPercent = [int][Math]::Round($areaTwo / 100.0)
             IsCurrent = ($mode.Width -eq $currentWidth -and $mode.Height -eq $currentHeight)
         }
     }
@@ -325,7 +347,10 @@ public class MonitorResolutions
 
     public struct RECT
     {
-        public int left, top, right, bottom;
+        public int left;
+        public int top;
+        public int right;
+        public int bottom;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
@@ -586,7 +611,8 @@ if ($rdpPaths.Count -gt 1) {
 
 # Ask left or right
 Write-Host "Left or Right? (L/R): " -NoNewline
-$side = [Console]::In.ReadLine().Trim().ToUpper()
+$sideInput = [Console]::In.ReadLine()
+$side = if ($null -eq $sideInput) { '' } else { $sideInput.Trim().ToUpper() }
 if ($side -ne 'L' -and $side -ne 'R') {
     Write-Host "Invalid selection."
     exit 1

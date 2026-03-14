@@ -35,9 +35,11 @@ IF [Side] = "invalid_side" THEN [FileSel] = "first";
 # invalid file selection only possible with two+ files
 IF [FileSel] IN {"second", "invalid_file"} THEN [FileCount] IN {"two", "directory"};
 
-# RdpSettings irrelevant when no file is written
+# RdpSettings irrelevant when no file is written (early-exit before file write)
 IF [FileCount] = "zero" THEN [RdpSettings] = "all_present";
 IF [FileCount] = "nonexistent" THEN [RdpSettings] = "all_present";
+IF [Side] = "invalid_side" THEN [RdpSettings] = "all_present";
+IF [MonitorResSel] = "invalid_selection" THEN [RdpSettings] = "all_present";
 
 # invalid_selection exits before side prompt, but nonexistent still reaches File.ReadAllLines
 # so only lock side/file for invalid_selection regardless of FileCount

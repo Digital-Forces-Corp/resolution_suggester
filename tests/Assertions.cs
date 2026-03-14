@@ -7,6 +7,16 @@ static class Assertions
     const double ChromeWidth96Dpi = 14.0;
     const double ChromeHeight96Dpi = 55.0 / 1.5;
 
+    const int ExplicitWxH_Width = 1024;
+    const int ExplicitWxH_Height = 768;
+    const int WidthOnly_Width = 1280;
+    const int WxND_Width = 1280;
+    const int WxND_Height = 960;
+    const int Picker_Width = 1280;
+    const int Picker_Height = 720;
+    const int Default_Width = 800;
+    const int Default_Height = 600;
+
     public record AssertResult(bool Passed, string Message);
 
     static AssertResult Ok() => new(true, "");
@@ -44,7 +54,7 @@ static class Assertions
         // --- Nonexistent file: crash after interactive prompts ---
         if (row.FileCount == "nonexistent")
         {
-            results.Add(AssertNotExitCode(result, 0));
+            results.Add(AssertExitCode(result, 1));
             return results;
         }
 
@@ -149,11 +159,11 @@ static class Assertions
     {
         return row.ResolutionArg switch
         {
-            "explicit_WxH" => 1024,
-            "width_only" => 1280,
-            "WxN_D" => 1280,
-            "picker" => 1280,
-            _ => 800
+            "explicit_WxH" => ExplicitWxH_Width,
+            "width_only" => WidthOnly_Width,
+            "WxN_D" => WxND_Width,
+            "picker" => Picker_Width,
+            _ => Default_Width
         };
     }
 
@@ -161,11 +171,11 @@ static class Assertions
     {
         return row.ResolutionArg switch
         {
-            "explicit_WxH" => 768,
-            "WxN_D" => 960,
-            "picker" => 720,
-            "width_only" => ComputeWidthOnlyHeight(1280, realMonitor, synthMonitor),
-            _ => 600
+            "explicit_WxH" => ExplicitWxH_Height,
+            "WxN_D" => WxND_Height,
+            "picker" => Picker_Height,
+            "width_only" => ComputeWidthOnlyHeight(WidthOnly_Width, realMonitor, synthMonitor),
+            _ => Default_Height
         };
     }
 
@@ -289,6 +299,8 @@ static class Assertions
         foreach (string modeStr in mon.TestModesArg.Split(','))
         {
             var match = Regex.Match(modeStr, @"^(\d+)x(\d+)(?:@(\d+)Hz)?$");
+            if (!match.Success)
+                return $"[ERROR: could not parse mode string \"{modeStr}\" in TestModesArg]";
             int modeW = int.Parse(match.Groups[1].Value);
             int modeH = int.Parse(match.Groups[2].Value);
             int modeFreq = match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : mon.Frequency;
@@ -373,7 +385,7 @@ static class Assertions
     {
         return result.ExitCode != notExpected
             ? Ok()
-            : Fail($"Expected exit code != {notExpected}, but got {result.ExitCode}");
+            : Fail($"Expected exit code != {notExpected}, but got {result.ExitCode}. stderr: {result.Stderr}");
     }
 
     static AssertResult AssertContains(string text, string substring, string label)

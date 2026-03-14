@@ -43,11 +43,13 @@ winget install DigitalForcesCorp.ResolutionSuggester
 resolution_suggester -h                 # show help
 resolution_suggester                    # default 800x600
 resolution_suggester -r 1280x1024       # 1280x1024
+resolution_suggester -r 1280            # width-only, height from monitor aspect ratio
+resolution_suggester -r 1280x4:3       # width with explicit 4:3 aspect ratio
 resolution_suggester server.rdp         # interactive: choose monitor resolution, and L/R position
 resolution_suggester C:\Users\me\rdp\   # interactive: choose monitor resolution, L/R position, and .rdp file
 ```
 
-`--rdp-resolution` / `-r` accepts `WxH` format. Default is `800x600`. `-r` with no argument opens an interactive picker to select from common RDP resolutions. The PowerShell script uses `-r` the same way.
+`--rdp-resolution` / `-r` accepts three formats: `WxH` (explicit width and height), `W` (width-only, height derived from monitor aspect ratio), and `WxN:D` (width with explicit aspect ratio). Default is `800x600`. `-r` with no argument opens an interactive picker to select from common RDP resolutions. The PowerShell script uses `-r` the same way.
 
 When `.rdp` file paths or directories are passed, the program enters interactive mode. It numbers each monitor resolution in the output, then prompts to choose a monitor resolution, an `.rdp` file (if multiple), and left/right window position. The selected `winposstr`, RDP resolution, and display settings are written directly into the `.rdp` file.
 
@@ -101,7 +103,7 @@ The program:
 2. Identifies the current monitor using `MonitorFromWindow` on the console window handle
 3. Reads current display settings and DPI via `EnumDisplaySettings` and `GetDpiForMonitor`
 4. Enumerates all display modes for that monitor, filtering to same aspect ratio (ratio difference < 0.001), same refresh rate, and minimum height to fit at least one RDP session plus window borders and title bar
-5. Computes the maximum integer zoom factor each monitor resolution supports (largest N where N \* base height + decoration height <= monitor resolution height, capped at 2)
+5. Computes the maximum integer zoom factor each monitor resolution supports (largest N where N \* base height + decoration height <= monitor resolution height, capped at the maximum zoom level, currently 2)
 6. Calculates area usage percentages and ranks results
 
 ## Releasing a New Version To Windows Package Manager (winget)
@@ -111,6 +113,19 @@ Pushing a `v*` tag triggers the [release workflow](.github/workflows/release.yml
 1. Builds the self-contained executable on `windows-latest`
 2. Creates a GitHub Release with auto-generated release notes and the `.exe` attached
 3. Submits the new version to winget via `winget-releaser` (requires `WINGET_TOKEN` GitHub repository secret)
+
+The package uses `InstallerType: portable` (bare `.exe`, no installer). Reference packages with the same pattern:
+
+- [7zip.7zr](https://github.com/microsoft/winget-pkgs/tree/master/manifests/7/7zip/7zr)
+- [Ahoy.Ahoy](https://github.com/microsoft/winget-pkgs/tree/master/manifests/a/Ahoy/Ahoy)
+- [pnpm.pnpm](https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/pnpm/pnpm)
+
+winget PR validation and merge times vary widely. Observed times for these portable packages (March 2025 \- March 2026):
+
+- New version PRs: 2 hours to 3 days
+- New package PRs: ~3 days (7zip.7zr 25.01, the only first-submission data point)
+
+The pipeline runs validation checks (manifest content, installer verification, post-validation) and then a maintainer must approve the merge. Most of the elapsed time is queue depth and maintainer availability, not the validation itself.
 
 ```
 git tag v1.2.0
