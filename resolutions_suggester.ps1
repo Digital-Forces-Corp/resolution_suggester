@@ -1,26 +1,133 @@
-﻿param(
+param(
     [Parameter(ValueFromRemainingArguments)]
-    [string[]]$Paths,
-    [string]$Resolution = '800x600'
+    [string[]]$Remaining
 )
 
-$resolutionParts = $Resolution -split 'x'
-if ($resolutionParts.Count -ne 2) {
-    Write-Host "Invalid resolution format. Use WxH (e.g. 800x600, 1280x1024)."
-    return
-}
-$rdpWidth = [int]$resolutionParts[0]
-$rdpHeight = [int]$resolutionParts[1]
+$MaxZoom = 2
 
-$rdpPaths = @()
-if ($Paths) {
-    foreach ($pathArg in $Paths) {
-        $resolved = (Resolve-Path $pathArg).Path
-        if (Test-Path $resolved -PathType Container) {
-            $rdpPaths += @(Get-ChildItem $resolved -Filter '*.rdp' | Select-Object -ExpandProperty FullName)
-        } else {
-            $rdpPaths += $resolved
+# Parse arguments: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [--help] [paths...]
+$rdpWidth = 800
+$rdpHeight = 600
+$pathArgs = @()
+$argIndex = 0
+
+while ($argIndex -lt $Remaining.Count) {
+    $arg = $Remaining[$argIndex]
+    if ($arg -eq '--help' -or $arg -eq '-h') {
+        Write-Host "Usage: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [paths...]"
+        Write-Host ""
+        Write-Host "Options:"
+        Write-Host "  --resolution, -r  RDP resolution (default: 800x600)"
+        Write-Host "                    WxH       explicit (e.g. 800x600, 1280x1024)"
+        Write-Host "                    W         width-only, height from monitor aspect ratio (e.g. 1280)"
+        Write-Host "                    WxN:D     width with aspect ratio (e.g. 1280x4:3)"
+        Write-Host "  --help, -h            Show this help"
+        Write-Host ""
+        Write-Host "Arguments:"
+        Write-Host "  paths              .rdp files or directories containing .rdp files"
+        Write-Host "                     When provided, enables interactive mode to update"
+        Write-Host "                     winposstr and resolution settings in the .rdp file"
+        return
+    }
+    elseif (($arg -eq '--resolution' -or $arg -eq '-r') -and ($argIndex + 1 -ge $Remaining.Count -or $Remaining[$argIndex + 1].StartsWith('-'))) {
+        $commonResolutions = @(
+            @{ W = 800;  H = 600;  Ratio = '4:3';   Name = 'SVGA' }
+            @{ W = 1024; H = 768;  Ratio = '4:3';   Name = 'XGA' }
+            @{ W = 1280; H = 720;  Ratio = '16:9';  Name = 'HD' }
+            @{ W = 1280; H = 800;  Ratio = '16:10'; Name = 'WXGA' }
+            @{ W = 1280; H = 1024; Ratio = '5:4';   Name = 'SXGA' }
+            @{ W = 1366; H = 768;  Ratio = '~16:9'; Name = 'HD' }
+            @{ W = 1440; H = 900;  Ratio = '16:10'; Name = 'WXGA+' }
+            @{ W = 1600; H = 900;  Ratio = '16:9';  Name = 'HD+' }
+            @{ W = 1680; H = 1050; Ratio = '16:10'; Name = 'WSXGA+' }
+            @{ W = 1600; H = 1200; Ratio = '4:3';   Name = 'UXGA' }
+            @{ W = 1920; H = 1080; Ratio = '16:9';  Name = 'FHD' }
+            @{ W = 1920; H = 1200; Ratio = '16:10'; Name = 'WUXGA' }
+            @{ W = 2560; H = 1080; Ratio = '~21:9'; Name = 'UWFHD' }
+            @{ W = 2560; H = 1440; Ratio = '16:9';  Name = 'QHD' }
+            @{ W = 2560; H = 1600; Ratio = '16:10'; Name = 'WQXGA' }
+        )
+        Write-Host "Common resolutions:"
+        for ($resIndex = 0; $resIndex -lt $commonResolutions.Count; $resIndex++) {
+            $resItem = $commonResolutions[$resIndex]
+            $num = ($resIndex + 1).ToString().PadLeft(2)
+            $heightStr = "$($resItem.W)x$($resItem.H)"
+            $ratioStr = $resItem.Ratio
+            Write-Host "  $num. $($heightStr.PadRight(10)) $($ratioStr.PadRight(6)) $($resItem.Name)"
         }
+        Write-Host "Select resolution: " -NoNewline
+        $resChoice = [Console]::In.ReadLine()
+        $resNum = 0
+        if (-not [int]::TryParse($resChoice, [ref]$resNum) -or $resNum -lt 1 -or $resNum -gt $commonResolutions.Count) {
+            Write-Host "Invalid selection."
+            return
+        }
+        $rdpWidth = $commonResolutions[$resNum - 1].W
+        $rdpHeight = $commonResolutions[$resNum - 1].H
+    }
+    elseif ($arg -eq '--resolution' -or $arg -eq '-r') {
+        $argIndex++
+        $parts = $Remaining[$argIndex] -split 'x'
+        if ($parts.Count -eq 1) {
+            $widthVal = 0
+            if ([int]::TryParse($parts[0], [ref]$widthVal)) {
+                $rdpWidth = $widthVal
+                $rdpHeight = 0  # derive from monitor aspect ratio after detection
+            }
+            else {
+                Write-Host "Invalid resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
+                return
+            }
+        }
+        elseif ($parts.Count -eq 2 -and $parts[1].Contains(':')) {
+            $widthVal = 0
+            if (-not [int]::TryParse($parts[0], [ref]$widthVal)) {
+                Write-Host "Invalid resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
+                return
+            }
+            $rdpWidth = $widthVal
+            $ratioParts = $parts[1] -split ':'
+            $ratioW = 0
+            $ratioH = 0
+            if ($ratioParts.Count -eq 2 -and [int]::TryParse($ratioParts[0], [ref]$ratioW) -and [int]::TryParse($ratioParts[1], [ref]$ratioH) -and $ratioW -gt 0 -and $ratioH -gt 0) {
+                $rdpHeight = [int]($rdpWidth * $ratioH / $ratioW)
+            }
+            else {
+                Write-Host "Invalid aspect ratio. Use N:D (e.g. 16:9, 4:3)."
+                return
+            }
+        }
+        elseif ($parts.Count -eq 2) {
+            $wVal = 0
+            $hVal = 0
+            if ([int]::TryParse($parts[0], [ref]$wVal) -and [int]::TryParse($parts[1], [ref]$hVal)) {
+                $rdpWidth = $wVal
+                $rdpHeight = $hVal
+            }
+            else {
+                Write-Host "Invalid resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
+                return
+            }
+        }
+        else {
+            Write-Host "Invalid resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
+            return
+        }
+    }
+    else {
+        $pathArgs += $arg
+    }
+    $argIndex++
+}
+
+# Resolve .rdp file paths
+$rdpPaths = @()
+foreach ($pathArg in $pathArgs) {
+    $resolved = (Resolve-Path $pathArg).Path
+    if (Test-Path $resolved -PathType Container) {
+        $rdpPaths += @(Get-ChildItem $resolved -Filter '*.rdp' | Select-Object -ExpandProperty FullName)
+    } else {
+        $rdpPaths += $resolved
     }
 }
 
@@ -87,6 +194,7 @@ public class DisplayResolutions
         public int CurrentWidth;
         public int CurrentHeight;
         public string CurrentRatioDisplay;
+        public double CurrentRatio;
         public double DpiScale;
         public int CurrentFrequency;
         public double ChromeWidth;
@@ -133,8 +241,6 @@ public class DisplayResolutions
 
     static int Gcd(int a, int b) { while (b != 0) { int t = b; b = a % b; a = t; } return a; }
 
-    const int max_zoom = 2;
-
     public static DisplayResult GetResolutionData(int rdp_width, int rdp_height)
     {
         double chrome_width_96dpi = 14.0;
@@ -171,7 +277,6 @@ public class DisplayResolutions
         double dpiScale = dpiX / 96.0;
         double chromeWidth = chrome_width_96dpi * dpiScale;
         double chromeHeight = chrome_height_96dpi * dpiScale;
-        int minimum_height = (int)Math.Ceiling(rdp_height + chromeHeight);
 
         int currentFrequency = currentSettings.dmDisplayFrequency;
         int currentWidth = currentSettings.dmPelsWidth;
@@ -179,6 +284,14 @@ public class DisplayResolutions
         int ratioGcd = Gcd(currentWidth, currentHeight);
         string currentRatioDisplay = (currentWidth / ratioGcd) + ":" + (currentHeight / ratioGcd);
         double currentRatio = (double)currentWidth / currentHeight;
+
+        // Derive height from monitor aspect ratio when only width was specified
+        if (rdp_height == 0)
+        {
+            rdp_height = (int)Math.Round(rdp_width / currentRatio);
+        }
+
+        int minimum_height = (int)Math.Ceiling(rdp_height + chromeHeight);
 
         while (EnumDisplaySettings(deviceName, modeIndex, ref devMode))
         {
@@ -202,6 +315,7 @@ public class DisplayResolutions
             modeIndex++;
         }
 
+        int max_zoom = 2;
         var computed = new List<ResolutionInfo>();
 
         foreach (var resolution in resolutionList)
@@ -235,6 +349,7 @@ public class DisplayResolutions
             CurrentWidth = currentWidth,
             CurrentHeight = currentHeight,
             CurrentRatioDisplay = currentRatioDisplay,
+            CurrentRatio = currentRatio,
             DpiScale = dpiScale,
             CurrentFrequency = currentFrequency,
             ChromeWidth = chromeWidth,
@@ -266,16 +381,19 @@ if ($result.Error) {
     return
 }
 
+# Update rdpWidth/rdpHeight in case they were derived from monitor aspect ratio
+$rdpWidth = $result.RdpWidth
+$rdpHeight = $result.RdpHeight
+
 # Display current monitor info
 $dpiPercent = ($result.DpiScale * 100).ToString("F0")
-Write-Host "Current Monitor $($result.MonitorNumber), $($result.CurrentWidth)x$($result.CurrentHeight), Ratio: $($result.CurrentRatioDisplay), DPI Scale $dpiPercent%, Frequency: $($result.CurrentFrequency)Hz"
+Write-Host "Current Monitor $($result.MonitorNumber), $($result.CurrentWidth)x$($result.CurrentHeight), Ratio: $($result.CurrentRatioDisplay), Frequency: $($result.CurrentFrequency)Hz, DPI Scale $dpiPercent%"
 
 # Display winposstr reference for current resolution at each zoom level
-$rdpLabel = "RDP $($result.RdpWidth)x$($result.RdpHeight)"
-$maxZoom = Invoke-Expression "[$typeName]::max_zoom"
-for ($zoom = 1; $zoom -le $maxZoom; $zoom++) {
-    $winW = [Math]::Ceiling($result.RdpWidth * $zoom + $result.ChromeWidth)
-    $winH = [Math]::Ceiling($result.RdpHeight * $zoom + $result.ChromeHeight)
+$rdpLabel = "RDP ${rdpWidth}x${rdpHeight}"
+for ($zoom = 1; $zoom -le $MaxZoom; $zoom++) {
+    $winW = [Math]::Ceiling($rdpWidth * $zoom + $result.ChromeWidth)
+    $winH = [Math]::Ceiling($rdpHeight * $zoom + $result.ChromeHeight)
     $x1 = $result.CurrentWidth - 1
     $x0 = $x1 - $winW
     Write-Host "$rdpLabel $($zoom * 100)% rdp zoom: winposstr:s:0,1,0,0,$winW,$winH  2nd: winposstr:s:0,1,$x0,0,$x1,$winH"
@@ -287,7 +405,7 @@ $scenarioNumber = 1
 
 # Display 1-window scenarios sorted by area
 $oneWindowSorted = @($result.Computed | Sort-Object -Property AreaOnePercent -Descending)
-Write-Host "`n--- Best for 1 $rdpLabel window (sorted by area used) ---"
+Write-Host "`n--- Resolutions for 1 $rdpLabel with same ratio and frequency sorted by area used ---"
 foreach ($res in $oneWindowSorted) {
     $marker = if ($res.IsCurrent) { "*" } else { "" }
     $prefix = if ($interactive) { "  $scenarioNumber. " } else { "" }
@@ -298,7 +416,7 @@ foreach ($res in $oneWindowSorted) {
 
 # Display 2-window scenarios sorted by area
 $twoWindowSorted = @($result.Computed | Sort-Object -Property AreaTwoPercent -Descending)
-Write-Host "`n--- Best for 2 $rdpLabel windows (sorted by area used) ---"
+Write-Host "`n--- Resolutions for 2 $rdpLabel with same ratio and frequency sorted by area used ---"
 foreach ($res in $twoWindowSorted) {
     $marker = if ($res.IsCurrent) { "*" } else { "" }
     $widthCapped = [Math]::Min($res.WidthUsageTwo, 100)
@@ -351,8 +469,8 @@ if ($side -ne 'L' -and $side -ne 'R') {
 }
 
 # Compute winposstr for the selected resolution and position
-$winW = [int][Math]::Ceiling($result.RdpWidth * $selectedRes.ZoomFactor + $result.ChromeWidth)
-$winH = [int][Math]::Ceiling($result.RdpHeight * $selectedRes.ZoomFactor + $result.ChromeHeight)
+$winW = [int][Math]::Ceiling($rdpWidth * $selectedRes.ZoomFactor + $result.ChromeWidth)
+$winH = [int][Math]::Ceiling($rdpHeight * $selectedRes.ZoomFactor + $result.ChromeHeight)
 if ($side -eq 'L') {
     $winposstr = "winposstr:s:0,1,0,0,$winW,$winH"
 } else {
@@ -367,8 +485,8 @@ $lines = @(Get-Content $targetPath -Encoding Unicode)
 $requiredSettings = @(
     @{ Key = 'smart sizing'; Value = 'smart sizing:i:0' }
     @{ Key = 'allow font smoothing'; Value = 'allow font smoothing:i:1' }
-    @{ Key = 'desktopwidth'; Value = "desktopwidth:i:$($result.RdpWidth)" }
-    @{ Key = 'desktopheight'; Value = "desktopheight:i:$($result.RdpHeight)" }
+    @{ Key = 'desktopwidth'; Value = "desktopwidth:i:${rdpWidth}" }
+    @{ Key = 'desktopheight'; Value = "desktopheight:i:${rdpHeight}" }
     @{ Key = 'winposstr'; Value = $winposstr }
 )
 

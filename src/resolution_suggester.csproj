@@ -10,6 +10,8 @@
     <PublishTrimmed>true</PublishTrimmed>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>resolution_suggester</AssemblyName>
+    <DebugType>none</DebugType>
+    <PublishDir>c:\dfc\scripts</PublishDir>
   </PropertyGroup>
 
 </Project>

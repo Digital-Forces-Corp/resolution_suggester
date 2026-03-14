@@ -17,13 +17,84 @@ var pathArgs = new List<string>();
 
 for (int argIndex = 0; argIndex < args.Length; argIndex++)
 {
-    if (args[argIndex] == "--resolution" && argIndex + 1 < args.Length)
+    if (args[argIndex] == "--help" || args[argIndex] == "-h")
+    {
+        Console.WriteLine("Usage: resolution_suggester [-r WxH|W|WxN:D] [paths...]");
+        Console.WriteLine();
+        Console.WriteLine("Options:");
+        Console.WriteLine("  --resolution, -r  RDP resolution (default: 800x600)");
+        Console.WriteLine("                    WxH       explicit (e.g. 800x600, 1280x1024)");
+        Console.WriteLine("                    W         width-only, height from monitor aspect ratio (e.g. 1280)");
+        Console.WriteLine("                    WxN:D     width with aspect ratio (e.g. 1280x4:3)");
+        Console.WriteLine("  --help, -h            Show this help");
+        Console.WriteLine();
+        Console.WriteLine("Arguments:");
+        Console.WriteLine("  paths              .rdp files or directories containing .rdp files");
+        Console.WriteLine("                     When provided, enables interactive mode to update");
+        Console.WriteLine("                     winposstr and resolution settings in the .rdp file");
+        return 0;
+    }
+    else if ((args[argIndex] == "--resolution" || args[argIndex] == "-r") && (argIndex + 1 >= args.Length || args[argIndex + 1].StartsWith("-")))
+    {
+        var commonResolutions = new (int W, int H, string Ratio, string Name)[]
+        {
+            (800,  600,  "4:3",   "SVGA"),
+            (1024, 768,  "4:3",   "XGA"),
+            (1280, 720,  "16:9",  "HD"),
+            (1280, 800,  "16:10", "WXGA"),
+            (1280, 1024, "5:4",   "SXGA"),
+            (1366, 768,  "~16:9", "HD"),
+            (1440, 900,  "16:10", "WXGA+"),
+            (1600, 900,  "16:9",  "HD+"),
+            (1680, 1050, "16:10", "WSXGA+"),
+            (1600, 1200, "4:3",   "UXGA"),
+            (1920, 1080, "16:9",  "FHD"),
+            (1920, 1200, "16:10", "WUXGA"),
+            (2560, 1080, "~21:9", "UWFHD"),
+            (2560, 1440, "16:9",  "QHD"),
+            (2560, 1600, "16:10", "WQXGA"),
+        };
+        Console.WriteLine("Common resolutions:");
+        for (int i = 0; i < commonResolutions.Length; i++)
+        {
+            var r = commonResolutions[i];
+            Console.WriteLine($"  {i + 1,2}. {r.W}x{r.H,-5} {r.Ratio,-5}  {r.Name}");
+        }
+        Console.Write("Select resolution: ");
+        string? resChoice = Console.ReadLine();
+        if (!int.TryParse(resChoice, out int resNum) || resNum < 1 || resNum > commonResolutions.Length)
+        {
+            Console.WriteLine("Invalid selection.");
+            return 1;
+        }
+        rdpWidth = commonResolutions[resNum - 1].W;
+        rdpHeight = commonResolutions[resNum - 1].H;
+    }
+    else if (args[argIndex] == "--resolution" || args[argIndex] == "-r")
     {
         argIndex++;
         string[] parts = args[argIndex].Split('x');
-        if (parts.Length != 2 || !int.TryParse(parts[0], out rdpWidth) || !int.TryParse(parts[1], out rdpHeight))
+        if (parts.Length == 1 && int.TryParse(parts[0], out rdpWidth))
         {
-            Console.WriteLine("Invalid resolution format. Use WxH (e.g. 800x600, 1280x1024).");
+            rdpHeight = 0; // derive from monitor aspect ratio after detection
+        }
+        else if (parts.Length == 2 && int.TryParse(parts[0], out rdpWidth) && parts[1].Contains(':'))
+        {
+            // WxN:D format: width with explicit aspect ratio (e.g. 1280x4:3)
+            string[] ratioParts = parts[1].Split(':');
+            if (ratioParts.Length == 2 && int.TryParse(ratioParts[0], out int ratioW) && int.TryParse(ratioParts[1], out int ratioH) && ratioW > 0 && ratioH > 0)
+            {
+                rdpHeight = rdpWidth * ratioH / ratioW;
+            }
+            else
+            {
+                Console.WriteLine("Invalid aspect ratio. Use N:D (e.g. 16:9, 4:3).");
+                return 1;
+            }
+        }
+        else if (parts.Length != 2 || !int.TryParse(parts[0], out rdpWidth) || !int.TryParse(parts[1], out rdpHeight))
+        {
+            Console.WriteLine("Invalid resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3).");
             return 1;
         }
     }
@@ -85,6 +156,13 @@ int ratioGcd = Gcd(currentWidth, currentHeight);
 string currentRatioDisplay = $"{currentWidth / ratioGcd}:{currentHeight / ratioGcd}";
 double currentRatio = (double)currentWidth / currentHeight;
 
+// Derive height from monitor aspect ratio when only width was specified
+if (rdpHeight == 0)
+{
+    rdpHeight = (int)Math.Round(rdpWidth / currentRatio);
+    minimumHeight = (int)Math.Ceiling(rdpHeight + chromeHeight);
+}
+
 // Enumerate available display modes
 var seen = new HashSet<string>();
 var modes = new List<(int Width, int Height)>();
@@ -137,7 +215,7 @@ foreach (var mode in modes)
 
 // Display current monitor info
 string dpiPercent = (dpiScale * 100).ToString("F0");
-Console.WriteLine($"Current Monitor {monitorNumber}, {currentWidth}x{currentHeight}, Ratio: {currentRatioDisplay}, DPI Scale {dpiPercent}%, Frequency: {currentFrequency}Hz");
+Console.WriteLine($"Current Monitor {monitorNumber}, {currentWidth}x{currentHeight}, Ratio: {currentRatioDisplay}, Frequency: {currentFrequency}Hz, DPI Scale {dpiPercent}%");
 
 // Display winposstr reference for current resolution at each zoom level
 string rdpLabel = $"RDP {rdpWidth}x{rdpHeight}";
@@ -156,7 +234,7 @@ int scenarioNumber = 1;
 
 // Display 1-window scenarios sorted by area
 var oneWindowSorted = computed.OrderByDescending(r => r.AreaOnePercent).ToList();
-Console.WriteLine($"\n--- Best for 1 {rdpLabel} window (sorted by area used) ---");
+Console.WriteLine($"\n--- Resolutions for 1 {rdpLabel} with same ratio and frequency sorted by area used ---");
 foreach (var res in oneWindowSorted)
 {
     string marker = res.IsCurrent ? "*" : "";
@@ -168,7 +246,7 @@ foreach (var res in oneWindowSorted)
 
 // Display 2-window scenarios sorted by area
 var twoWindowSorted = computed.OrderByDescending(r => r.AreaTwoPercent).ToList();
-Console.WriteLine($"\n--- Best for 2 {rdpLabel} windows (sorted by area used) ---");
+Console.WriteLine($"\n--- Resolutions for 2 {rdpLabel} with same ratio and frequency sorted by area used ---");
 foreach (var res in twoWindowSorted)
 {
     string marker = res.IsCurrent ? "*" : "";
