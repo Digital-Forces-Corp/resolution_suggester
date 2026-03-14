@@ -6,6 +6,9 @@ param(
 $MaxZoom = 2
 $ChromeHeightAt96Dpi = 55.0 / 1.5
 $ChromeWidthAt96Dpi = 14.0
+$RatioTolerance = 0.001
+$MaxRdpDimension = 8192
+$InvalidResolutionFormatMsg = "Invalid RDP resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
 
 # Parse arguments: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [--help] [paths...]
 $rdpWidth = 800
@@ -33,7 +36,7 @@ while ($argIndex -lt $InputArgs.Count) {
         Write-Host "                     winposstr and RDP resolution settings in the .rdp file"
         return
     }
-    elseif (($arg -eq '--rdp-resolution' -or $arg -eq '-r') -and (($argIndex + 1 -ge $InputArgs.Count) -or ($InputArgs[$argIndex + 1].StartsWith('--')) -or ($InputArgs[$argIndex + 1] -eq '-h'))) {
+    elseif (($arg -eq '--rdp-resolution' -or $arg -eq '-r') -and (($argIndex + 1 -ge $InputArgs.Count) -or ($argIndex + 1 -lt $InputArgs.Count -and $InputArgs[$argIndex + 1].StartsWith('--')) -or ($argIndex + 1 -lt $InputArgs.Count -and $InputArgs[$argIndex + 1] -eq '-h'))) {
         $commonRdpResolutions = @(
             @{ W = 800;  H = 600;  Ratio = '4:3';   Name = 'SVGA' }
             @{ W = 1024; H = 768;  Ratio = '4:3';   Name = 'XGA' }
@@ -61,6 +64,10 @@ while ($argIndex -lt $InputArgs.Count) {
         }
         Write-Host "Select RDP resolution: " -NoNewline
         $resChoice = [Console]::In.ReadLine()
+        if ($null -eq $resChoice) {
+            Write-Host "ERROR: No input received."
+            exit 1
+        }
         $resNum = 0
         if (-not [int]::TryParse($resChoice, [ref]$resNum) -or $resNum -lt 1 -or $resNum -gt $commonRdpResolutions.Count) {
             Write-Host "Invalid selection."
@@ -80,17 +87,21 @@ while ($argIndex -lt $InputArgs.Count) {
                     Write-Host "RDP width must be a positive integer."
                     exit 1
                 }
+                if ($rdpWidth -gt $MaxRdpDimension) {
+                    Write-Host "RDP width exceeds maximum of $MaxRdpDimension."
+                    exit 1
+                }
                 $rdpHeight = 0  # derive from monitor aspect ratio after detection
             }
             else {
-                Write-Host "Invalid RDP resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
+                Write-Host $InvalidResolutionFormatMsg
                 exit 1
             }
         }
         elseif ($parts.Count -eq 2 -and $parts[1].Contains(':')) {
             $widthVal = 0
             if (-not [int]::TryParse($parts[0], [ref]$widthVal)) {
-                Write-Host "Invalid RDP resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
+                Write-Host $InvalidResolutionFormatMsg
                 exit 1
             }
             $rdpWidth = $widthVal
@@ -108,6 +119,10 @@ while ($argIndex -lt $InputArgs.Count) {
                 Write-Host "RDP width and height must be positive integers."
                 exit 1
             }
+            if ($rdpWidth -gt $MaxRdpDimension -or $rdpHeight -gt $MaxRdpDimension) {
+                Write-Host "RDP dimensions exceed maximum of ${MaxRdpDimension}x${MaxRdpDimension}."
+                exit 1
+            }
         }
         elseif ($parts.Count -eq 2) {
             $wVal = 0
@@ -119,14 +134,18 @@ while ($argIndex -lt $InputArgs.Count) {
                     Write-Host "RDP width and height must be positive integers."
                     exit 1
                 }
+                if ($rdpWidth -gt $MaxRdpDimension -or $rdpHeight -gt $MaxRdpDimension) {
+                    Write-Host "RDP dimensions exceed maximum of ${MaxRdpDimension}x${MaxRdpDimension}."
+                    exit 1
+                }
             }
             else {
-                Write-Host "Invalid RDP resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
+                Write-Host $InvalidResolutionFormatMsg
                 exit 1
             }
         }
         else {
-            Write-Host "Invalid RDP resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
+            Write-Host $InvalidResolutionFormatMsg
             exit 1
         }
     }
@@ -165,6 +184,28 @@ foreach ($pathArg in $pathArgs) {
 
 function Get-Gcd([int]$a, [int]$b) { while ($b -ne 0) { $t = $b; $b = $a % $b; $a = $t } return $a }
 
+function Get-FilteredModes([array]$Modes, [int]$TargetFrequency, [int]$MinimumHeight, [double]$TargetRatio, [double]$RatioToleranceParam) {
+    $seen = @{}
+    $filtered = @()
+    foreach ($modeEntry in $Modes) {
+        $modeW = $modeEntry.Width
+        $modeH = $modeEntry.Height
+        $modeFreq = $modeEntry.Frequency
+
+        if ($modeFreq -eq $TargetFrequency -and $modeH -ge $MinimumHeight -and $modeH -gt 0) {
+            $ratio = [double]$modeW / $modeH
+            if ([Math]::Abs($ratio - $TargetRatio) -lt $RatioToleranceParam) {
+                $key = "${modeW}x${modeH}"
+                if (-not $seen.ContainsKey($key)) {
+                    $seen[$key] = $true
+                    $filtered += @{ Width = $modeW; Height = $modeH }
+                }
+            }
+        }
+    }
+    return ,$filtered
+}
+
 if ($testMonitor) {
     # Parse --test-monitor: WxH@FHz@Ddpi (e.g. 2560x1440@60Hz@96dpi)
     if ($testMonitor -notmatch '^(\d+)x(\d+)@(\d+)Hz@(\d+)dpi$') {
@@ -190,9 +231,8 @@ if ($testMonitor) {
         exit 1
     }
 
-    # Parse --test-modes and filter
-    $seen = @{}
-    $modes = @()
+    # Parse --test-modes into mode entries with frequency
+    $parsedModes = @()
     foreach ($modeStr in $testModes.Split(',')) {
         if ($modeStr -notmatch '^(\d+)x(\d+)(?:@(\d+)Hz)?$') {
             Write-Host "Invalid mode in --test-modes: $modeStr. Use WxH or WxH@FHz."
@@ -202,20 +242,14 @@ if ($testMonitor) {
         $modeH = [int]$Matches[2]
         $modeFreq = if ($Matches[3]) { [int]$Matches[3] } else { $currentFrequency }
 
-        if ($modeFreq -eq $currentFrequency -and $modeH -ge $minimumHeight -and $modeH -gt 0) {
-            $ratio = [double]$modeW / $modeH
-            if ([Math]::Abs($ratio - $currentRatio) -lt 0.001) {
-                $key = "${modeW}x${modeH}"
-                if (-not $seen.ContainsKey($key)) {
-                    $seen[$key] = $true
-                    $modes += @{ Width = $modeW; Height = $modeH }
-                }
-            }
-        }
+        $parsedModes += @{ Width = $modeW; Height = $modeH; Frequency = $modeFreq }
     }
+
+    $modes = Get-FilteredModes -Modes $parsedModes -TargetFrequency $currentFrequency -MinimumHeight $minimumHeight -TargetRatio $currentRatio -RatioToleranceParam $RatioTolerance
 
     # Derive height from monitor aspect ratio when only width was specified
     if ($rdpHeight -eq 0) {
+        if ($currentRatio -eq 0) { Write-Host "ERROR: Monitor reported zero height."; exit 1 }
         $rdpHeight = [int][Math]::Round($rdpWidth / $currentRatio)
         $minimumHeight = [int][Math]::Ceiling($rdpHeight + $chromeHeight)
 
@@ -233,12 +267,13 @@ if ($testMonitor) {
     $computed = @()
     foreach ($mode in $modes) {
         $zoom = [Math]::Min([int][Math]::Floor(($mode.Height - $chromeHeight) / $rdpHeight), $MaxZoom)
+        if ($zoom -lt 1) { continue }
         $winWidth = $rdpWidth * $zoom + $chromeWidth
         $winHeight = $rdpHeight * $zoom + $chromeHeight
         $widthUsage = [int][Math]::Round($winWidth / $mode.Width * 100)
         $widthUsageTwo = [int][Math]::Round(2 * $winWidth / $mode.Width * 100)
         $heightUsage = [int][Math]::Round($winHeight / $mode.Height * 100)
-        $areaOne = $widthUsage * $heightUsage
+        $areaOne = [Math]::Min($widthUsage, 100) * $heightUsage
         $areaTwo = [Math]::Min($widthUsageTwo, 100) * $heightUsage
 
         $computed += [PSCustomObject]@{
@@ -345,12 +380,20 @@ public class MonitorResolutions
         public string Error;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
     public struct RECT
     {
         public int left;
         public int top;
         public int right;
         public int bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int x;
+        public int y;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
@@ -367,11 +410,8 @@ public class MonitorResolutions
     [DllImport("user32.dll")]
     public static extern bool EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
 
-    [DllImport("kernel32.dll")]
-    public static extern IntPtr GetConsoleWindow();
-
     [DllImport("user32.dll")]
-    public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+    public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
 
     [DllImport("shcore.dll")]
     public static extern int SetProcessDpiAwareness(int awareness);
@@ -382,23 +422,28 @@ public class MonitorResolutions
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX lpmi);
 
+    const double RatioTolerance = 0.001;
+
     static int Gcd(int a, int b) { while (b != 0) { int t = b; b = a % b; a = t; } return a; }
 
-    public static DisplayResult GetMonitorData(int rdp_width, int rdp_height)
+    public static DisplayResult GetMonitorData(int rdp_width, int rdp_height, int max_zoom, double chrome_width_96dpi, double chrome_height_96dpi)
     {
-        double chrome_width_96dpi = 14.0;
-        double chrome_height_96dpi = 55.0 / 1.5;
         DEVMODE devMode = new DEVMODE();
+        devMode.dmSize = (short)Marshal.SizeOf(devMode);
         DEVMODE currentSettings = new DEVMODE();
+        currentSettings.dmSize = (short)Marshal.SizeOf(currentSettings);
         int modeIndex = 0;
         HashSet<string> addedMonitorResolutions = new HashSet<string>();
         List<MonitorResolution> monitorResolutions = new List<MonitorResolution>();
         const int ENUM_CURRENT_SETTINGS = -1;
 
-        SetProcessDpiAwareness(2); // PROCESS_PER_MONITOR_DPI_AWARE
+        int dpiAwarenessResult = SetProcessDpiAwareness(2); // PROCESS_PER_MONITOR_DPI_AWARE
+        if (dpiAwarenessResult != 0 && dpiAwarenessResult != unchecked((int)0x80070005)) // E_ACCESSDENIED = already set
+        {
+            return new DisplayResult { Error = string.Format("WARNING: SetProcessDpiAwareness failed with HRESULT 0x{0:X8}.", dpiAwarenessResult) };
+        }
 
-        IntPtr consoleHandle = GetConsoleWindow();
-        IntPtr monitorHandle = MonitorFromWindow(consoleHandle, 2); // MONITOR_DEFAULTTONEAREST
+        IntPtr monitorHandle = MonitorFromPoint(new POINT { x = 0, y = 1 }, 2); // MONITOR_DEFAULTTONEAREST
 
         MONITORINFOEX monitorInfo = new MONITORINFOEX();
         monitorInfo.cbSize = Marshal.SizeOf(monitorInfo);
@@ -446,7 +491,7 @@ public class MonitorResolutions
             {
                 double ratio = (double)devMode.dmPelsWidth / devMode.dmPelsHeight;
 
-                if (Math.Abs(ratio - currentRatio) < 0.001)
+                if (Math.Abs(ratio - currentRatio) < RatioTolerance)
                 {
                     string monitorResolutionKey = devMode.dmPelsWidth + "x" + devMode.dmPelsHeight;
                     if (addedMonitorResolutions.Add(monitorResolutionKey))
@@ -462,18 +507,19 @@ public class MonitorResolutions
             modeIndex++;
         }
 
-        int max_zoom = 2; // must match $MaxZoom
+        // max_zoom passed as parameter from $MaxZoom
         var computed = new List<MonitorResolution>();
 
         foreach (var monitorResolution in monitorResolutions)
         {
             int zoomFactor = Math.Min((int)Math.Floor((monitorResolution.Height - chromeHeight) / rdp_height), max_zoom);
+            if (zoomFactor < 1) continue;
             double windowWidth = rdp_width * zoomFactor + chromeWidth;
             double windowHeight = rdp_height * zoomFactor + chromeHeight;
             int widthUsage = (int)Math.Round(windowWidth / monitorResolution.Width * 100);
             int widthUsageTwo = (int)Math.Round(2 * windowWidth / monitorResolution.Width * 100);
             int heightUsage = (int)Math.Round(windowHeight / monitorResolution.Height * 100);
-            int areaOne = widthUsage * heightUsage;
+            int areaOne = Math.Min(widthUsage, 100) * heightUsage;
             int areaTwo = Math.Min(widthUsageTwo, 100) * heightUsage;
 
             computed.Add(new MonitorResolution
@@ -484,8 +530,8 @@ public class MonitorResolutions
                 WidthUsage = widthUsage,
                 WidthUsageTwo = widthUsageTwo,
                 HeightUsage = heightUsage,
-                AreaOnePercent = areaOne / 100,
-                AreaTwoPercent = areaTwo / 100,
+                AreaOnePercent = (int)Math.Round(areaOne / 100.0),
+                AreaTwoPercent = (int)Math.Round(areaTwo / 100.0),
                 IsCurrent = (monitorResolution.Width == currentWidth && monitorResolution.Height == currentHeight)
             });
         }
@@ -523,7 +569,8 @@ if (-not ($typeName -as [type])) {
 }
 
 $type = $typeName -as [type]
-$result = $type::GetMonitorData($rdpWidth, $rdpHeight)
+if ($null -eq $type) { Write-Host "ERROR: Failed to load P/Invoke type '$typeName'."; exit 1 }
+$result = $type::GetMonitorData($rdpWidth, $rdpHeight, $MaxZoom, $ChromeWidthAt96Dpi, $ChromeHeightAt96Dpi)
 if ($result.Error) {
     Write-Host $result.Error
     exit 1
@@ -585,6 +632,10 @@ if (-not $interactive) {
 Write-Host ""
 Write-Host "Select monitor resolution: " -NoNewline
 $choiceText = [Console]::In.ReadLine()
+if ($null -eq $choiceText) {
+    Write-Host "ERROR: No input received."
+    exit 1
+}
 $choiceNum = 0
 if (-not [int]::TryParse($choiceText, [ref]$choiceNum) -or $choiceNum -lt 1 -or $choiceNum -gt $monitorResolutions.Count) {
     Write-Host "Invalid selection."
@@ -601,6 +652,10 @@ if ($rdpPaths.Count -gt 1) {
     }
     Write-Host "Select RDP file: " -NoNewline
     $rdpChoiceText = [Console]::In.ReadLine()
+    if ($null -eq $rdpChoiceText) {
+        Write-Host "ERROR: No input received."
+        exit 1
+    }
     $rdpChoiceNum = 0
     if (-not [int]::TryParse($rdpChoiceText, [ref]$rdpChoiceNum) -or $rdpChoiceNum -lt 1 -or $rdpChoiceNum -gt $rdpPaths.Count) {
         Write-Host "Invalid selection."
@@ -625,7 +680,7 @@ if ($side -eq 'L') {
     $winposstr = "winposstr:s:0,1,0,0,$winW,$winH"
 } else {
     $x1 = $monitorResolutionSelected.Width - 1
-    $x0 = $x1 - $winW
+    $x0 = [Math]::Max(0, $x1 - $winW)
     $winposstr = "winposstr:s:0,1,$x0,0,$x1,$winH"
 }
 
@@ -660,5 +715,11 @@ foreach ($setting in $requiredSettings) {
     }
 }
 
-$lines | Set-Content $targetPath -Encoding Unicode
+try {
+    $lines | Set-Content $targetPath -Encoding Unicode
+}
+catch {
+    Write-Host "ERROR: Failed to write ${targetPath}: $($_.Exception.Message)"
+    exit 1
+}
 Write-Host "Updated $targetPath with $winposstr"

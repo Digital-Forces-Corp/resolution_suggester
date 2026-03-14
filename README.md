@@ -100,7 +100,7 @@ winposstr:s:0,1,0,0,814,637
 The program:
 
 1. Calls `SetProcessDpiAwareness` with `PROCESS_PER_MONITOR_DPI_AWARE` to enable per-monitor DPI awareness
-2. Identifies the current monitor using `MonitorFromWindow` on the console window handle
+2. Identifies the current monitor using `MonitorFromPoint` with point (0,1) and `MONITOR_DEFAULTTONEAREST`
 3. Reads current display settings and DPI via `EnumDisplaySettings` and `GetDpiForMonitor`
 4. Enumerates all display modes for that monitor, filtering to same aspect ratio (ratio difference < 0.001), same refresh rate, and minimum height to fit at least one RDP session plus window borders and title bar
 5. Computes the maximum integer zoom factor each monitor resolution supports (largest N where N \* base height + decoration height <= monitor resolution height, capped at the maximum zoom level, currently 2)
@@ -140,4 +140,6 @@ Requires .NET 8 SDK. The PowerShell script needs no build step.
 dotnet publish src/resolution_suggester.csproj -c Release
 ```
 
-Produces `c:\dfc\scripts\resolution_suggester.exe`.
+Produces `publish\resolution_suggester.exe` (pass `-o publish` as shown above).
+
+The test project (`tests/`) does not use a `<ProjectReference>` to the main project. The main project publishes as a self-contained single-file executable, and .NET SDK error NETSDK1151 prohibits a non-self-contained project from referencing a self-contained one. Instead, the test runner locates the built exe by convention at `src/bin/Release/net8.0-windows/win-x64/resolution_suggester.exe`. Build the main project before running tests.

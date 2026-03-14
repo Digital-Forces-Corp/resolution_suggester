@@ -7,6 +7,7 @@ MonitorResSel:    one_window, two_window, invalid_selection
 Side:           L, R, invalid_side
 FileCount:      zero, one, two, directory, nonexistent
 FileSel:        first, second, invalid_file
+# RdpSettings: whether desktopwidth/desktopheight/winposstr/smart-sizing are pre-populated in the .rdp fixture
 RdpSettings:    all_present, none_present, partial
 
 # Constraints
@@ -16,14 +17,13 @@ IF [ResolutionArg] = "help"           THEN [MonitorResSel] = "one_window" AND [S
 IF [ResolutionArg] = "invalid_format" THEN [MonitorResSel] = "one_window" AND [Side] = "L" AND [FileCount] = "zero" AND [FileSel] = "first" AND [RdpSettings] = "all_present";
 IF [ResolutionArg] = "invalid_ratio"  THEN [MonitorResSel] = "one_window" AND [Side] = "L" AND [FileCount] = "zero" AND [FileSel] = "first" AND [RdpSettings] = "all_present";
 
-# zero files = non-interactive, no scenario/side/file prompts matter
+# zero files = non-interactive (even with picker — picker only selects the RDP resolution,
+# the MonitorResSel/Side prompts require files to be provided)
 IF [FileCount] = "zero" THEN [MonitorResSel] = "one_window" AND [Side] = "L" AND [FileSel] = "first";
 
+# file selection prompt only appears with two+ files
 # nonexistent file: all interactive prompts complete, crash at File.ReadAllLines after
 # so interactive factors vary normally; only FileSel locked (single nonexistent file)
-IF [FileCount] = "nonexistent" THEN [FileSel] = "first";
-
-# file selection prompt only appears with two+ files
 IF [FileCount] IN {"one", "nonexistent"} THEN [FileSel] = "first";
 
 # invalid scenario exits before file/side prompts

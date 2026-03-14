@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 
 const string ImplCSharp = "csharp";
 const string ImplPs1 = "ps1";
+const string OneRdpSectionMarker = "1 RDP";
 
 // Find the exe and PS1: build first, then locate in bin
 string projectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
@@ -50,12 +51,12 @@ int totalFailed = 0;
 // Run tests against C# exe
 Console.WriteLine();
 Console.WriteLine("=== C# implementation ===");
-totalFailed += RunTestSuite(ImplCSharp, rows, realMonitor, exePath, ps1Path, tsvPath);
+totalFailed += RunTestSuite(ImplCSharp, rows, realMonitor, exePath, ps1Path);
 
 // Run tests against PS1 script
 Console.WriteLine();
 Console.WriteLine("=== PowerShell implementation ===");
-totalFailed += RunTestSuite(ImplPs1, rows, realMonitor, exePath, ps1Path, tsvPath);
+totalFailed += RunTestSuite(ImplPs1, rows, realMonitor, exePath, ps1Path);
 
 return totalFailed > 0 ? 1 : 0;
 
@@ -64,8 +65,7 @@ static int RunTestSuite(
     List<TestCase.PictRow> rows,
     MonitorOracle.MonitorData? realMonitor,
     string exePath,
-    string ps1Path,
-    string tsvPath)
+    string ps1Path)
 {
     int passed = 0;
     int failed = 0;
@@ -75,36 +75,38 @@ static int RunTestSuite(
     for (int i = 0; i < rows.Count; i++)
     {
         var row = rows[i];
-        string label = $"[{i + 1}/{rows.Count}] {row.Monitor} | {row.ResolutionArg} | {row.MonitorResSel} | {row.Side} | {row.FileCount} | {row.FileSel} | {row.RdpSettings}";
+        string label = $"[{i + 1}/{rows.Count}] {FormatTestLabel(row)}";
 
         // Skip real monitor tests if no monitor detected
-        if (row.Monitor == "real" && realMonitor == null)
+        if (row.Monitor == TestCase.MonitorReal && realMonitor == null)
         {
             Console.WriteLine($"  SKIP {label}");
             skipped++;
             continue;
         }
 
-        string tempDir = "";
+        string? tempDir = null;
         try
         {
             // Setup
             tempDir = FixtureManager.SetupTempDir(row.RdpSettings, row.FileCount);
 
             // Build args and stdin
-            string cliArgs = TestCase.BuildCliArgs(row, tempDir, impl);
+            string cliArgs = TestCase.BuildCliArgs(row, tempDir);
             string? stdin = TestCase.BuildStdin(row);
 
             // Resolve TWO_WINDOW_FIRST placeholder:
             // Run a non-interactive dry run to count one-window options, then use count + 1.
             if (stdin != null && stdin.Contains("TWO_WINDOW_FIRST"))
             {
-                string dryArgs = TestCase.BuildCliArgs(row with { FileCount = "zero" }, tempDir, impl);
-                string? dryStdin = row.ResolutionArg == "picker" ? TestCase.PickerSelection + "\n" : null;
+                string dryArgs = TestCase.BuildCliArgs(row with { FileCount = "zero" }, tempDir);
+                string? dryStdin = row.ResolutionArg == "picker" ? TestCase.PickerSelection + "\n1\nL\n" : "1\nL\n";
                 var dryResult = RunImpl(impl, exePath, ps1Path, dryArgs, dryStdin);
                 if (dryResult.ExitCode != 0)
                     throw new InvalidOperationException($"Dry-run exited with code {dryResult.ExitCode}: {dryResult.Stderr}");
-                int oneWindowCount = CountOptionLines(dryResult.Stdout, "1 RDP");
+                int oneWindowCount = CountOptionLines(dryResult.Stdout, OneRdpSectionMarker);
+                if (oneWindowCount == 0)
+                    throw new InvalidOperationException("Dry-run produced no one-window options for two_window test");
                 stdin = stdin.Replace("TWO_WINDOW_FIRST", (oneWindowCount + 1).ToString());
             }
 
@@ -138,7 +140,7 @@ static int RunTestSuite(
         }
         finally
         {
-            if (tempDir.Length > 0)
+            if (tempDir != null)
                 FixtureManager.Cleanup(tempDir);
         }
     }
@@ -152,7 +154,7 @@ static int RunTestSuite(
         Console.WriteLine("=== FAILURES ===");
         foreach (var (index, row, results) in failures)
         {
-            Console.WriteLine($"\n  Test {index}: {row.Monitor} | {row.ResolutionArg} | {row.MonitorResSel} | {row.Side} | {row.FileCount} | {row.FileSel} | {row.RdpSettings}");
+            Console.WriteLine($"\n  Test {index}: {FormatTestLabel(row)}");
             foreach (var r in results.Where(r => !r.Passed))
                 Console.WriteLine($"    {r.Message}");
         }
@@ -172,6 +174,9 @@ static ProcessRunner.RunResult RunImpl(string impl, string exePath, string ps1Pa
     return ProcessRunner.Run(exePath, args, stdin);
 }
 
+static string FormatTestLabel(TestCase.PictRow row) =>
+    $"{row.Monitor} | {row.ResolutionArg} | {row.MonitorResSel} | {row.Side} | {row.FileCount} | {row.FileSel} | {row.RdpSettings}";
+
 static int CountOptionLines(string stdout, string sectionMarker)
 {
     var lines = stdout.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
@@ -188,7 +193,7 @@ static int CountOptionLines(string stdout, string sectionMarker)
         }
         if (inSection && line.Trim().StartsWith("---"))
             break;
-        if (inSection && line.Trim().Length > 0)
+        if (inSection && Regex.IsMatch(line.Trim(), @"^\*?\d+x\d+,"))
             count++;
     }
     if (!sectionFound)

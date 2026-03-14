@@ -34,15 +34,18 @@ static class ProcessRunner
         var stderrTask = Task.Run(() => process.StandardError.ReadToEnd());
         var stdoutTask = Task.Run(() => process.StandardOutput.ReadToEnd());
 
+        const int StreamDrainTimeoutMs = 2000;
+
         if (!process.WaitForExit(timeoutMs))
         {
             process.Kill();
-            process.WaitForExit(timeoutMs);
-            Task.WaitAll(new[] { stdoutTask, stderrTask }, 2000);
+            process.WaitForExit();
+            Task.WaitAll(new[] { stdoutTask, stderrTask }, StreamDrainTimeoutMs);
             throw new TimeoutException($"Process timed out after {timeoutMs}ms");
         }
 
-        // .Result blocks until EOF is reached (which happens when the process exits)
+        if (!Task.WaitAll(new[] { stdoutTask, stderrTask }, StreamDrainTimeoutMs))
+            throw new InvalidOperationException($"Stream drain timed out after {StreamDrainTimeoutMs}ms");
         string stdout = stdoutTask.Result;
         string stderr = stderrTask.Result;
 

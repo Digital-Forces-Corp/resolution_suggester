@@ -6,7 +6,11 @@ static class FixtureManager
     public const string FileCountNonexistent = "nonexistent";
     public const string FileCountZero = "zero";
 
-    static readonly string FixturesDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "fixtures"));
+    public const string FixtureAllPresent = "test1.rdp";
+    public const string FixtureNonePresent = "test2.rdp";
+    public const string FixturePartial = "test1_partial.rdp";
+
+    internal static readonly string FixturesDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "fixtures"));
 
     public static string SetupTempDir(string rdpSettings, string fileCount)
     {
@@ -15,9 +19,9 @@ static class FixtureManager
 
         string fixtureFile = rdpSettings switch
         {
-            "all_present" => "test1.rdp",
-            "none_present" => "test2.rdp",
-            "partial" => "test1_partial.rdp",
+            "all_present" => FixtureAllPresent,
+            "none_present" => FixtureNonePresent,
+            "partial" => FixturePartial,
             _ => throw new ArgumentException($"Unknown RdpSettings: {rdpSettings}")
         };
 
@@ -28,24 +32,24 @@ static class FixtureManager
 
         if (fileCount == FileCountDirectory)
         {
-            string subdir = Path.Combine(tempDir, "testdir");
+            string subdir = Path.Combine(tempDir, TestCase.FixtureTestDir);
             Directory.CreateDirectory(subdir);
-            File.Copy(sourceFile, Path.Combine(subdir, "test1.rdp"));
+            File.Copy(sourceFile, Path.Combine(subdir, TestCase.FixtureTest1));
             // Second file always uses test2.rdp (none_present) so we can verify which was modified
-            File.Copy(Path.Combine(FixturesDir, "test2.rdp"), Path.Combine(subdir, "test2.rdp"));
+            File.Copy(Path.Combine(FixturesDir, TestCase.FixtureTest2), Path.Combine(subdir, TestCase.FixtureTest2));
             return tempDir;
         }
 
         if (fileCount == FileCountOne)
         {
-            File.Copy(sourceFile, Path.Combine(tempDir, "test1.rdp"));
+            File.Copy(sourceFile, Path.Combine(tempDir, TestCase.FixtureTest1));
             return tempDir;
         }
 
         if (fileCount == FileCountTwo)
         {
-            File.Copy(sourceFile, Path.Combine(tempDir, "test1.rdp"));
-            File.Copy(Path.Combine(FixturesDir, "test2.rdp"), Path.Combine(tempDir, "test2.rdp"));
+            File.Copy(sourceFile, Path.Combine(tempDir, TestCase.FixtureTest1));
+            File.Copy(Path.Combine(FixturesDir, TestCase.FixtureTest2), Path.Combine(tempDir, TestCase.FixtureTest2));
             return tempDir;
         }
 

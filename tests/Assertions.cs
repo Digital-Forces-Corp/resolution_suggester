@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 static class Assertions
 {
     const int MaxZoom = 2;
+    const double RatioTolerance = 0.001;
     const double ChromeWidth96Dpi = 14.0;
     const double ChromeHeight96Dpi = 55.0 / 1.5;
 
@@ -86,7 +87,7 @@ static class Assertions
         results.Add(AssertExitCode(result, 0));
 
         // Header line
-        if (row.Monitor == "real" && realMonitor != null)
+        if (row.Monitor == TestCase.MonitorReal && realMonitor != null)
         {
             results.Add(AssertContains(result.Stdout, "Current Monitor #", "monitor header"));
             results.Add(AssertContains(result.Stdout, $"Ratio: {realMonitor.RatioDisplay}", "ratio in header"));
@@ -94,7 +95,7 @@ static class Assertions
             string dpiPct = (realMonitor.Dpi / 96.0 * 100).ToString("F0");
             results.Add(AssertContains(result.Stdout, $"DPI Scale {dpiPct}%", "DPI in header"));
         }
-        else if (row.Monitor != "real")
+        else if (row.Monitor != TestCase.MonitorReal)
         {
             var mon = SyntheticMonitor.All[row.Monitor];
             string expectedDpi = (mon.Dpi / 96.0 * 100).ToString("F0");
@@ -124,11 +125,11 @@ static class Assertions
 
         // Winposstr reference lines (always present for non-error cases)
         int rdpW = GetExpectedRdpWidth(row);
-        int rdpH = GetExpectedRdpHeight(row, realMonitor, row.Monitor != "real" ? SyntheticMonitor.All[row.Monitor] : null);
+        int rdpH = GetExpectedRdpHeight(row, realMonitor, row.Monitor != TestCase.MonitorReal ? SyntheticMonitor.All[row.Monitor] : null);
         results.Add(AssertContains(result.Stdout, $"RDP {rdpW}x{rdpH}", "winposstr reference label"));
 
         // Verify exact winposstr reference line values for synthetic monitors
-        if (row.Monitor != "real")
+        if (row.Monitor != TestCase.MonitorReal)
         {
             var mon = SyntheticMonitor.All[row.Monitor];
             double dpiScaleRef = mon.Dpi / 96.0;
@@ -191,8 +192,6 @@ static class Assertions
         return (int)Math.Round(width / ratio);
     }
 
-    static readonly string FixturesDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "fixtures");
-
     static List<AssertResult> AssertRdpFile(TestCase.PictRow row, string tempDir, int rdpW, int rdpH)
     {
         var results = new List<AssertResult>();
@@ -204,6 +203,11 @@ static class Assertions
             string subdir = Path.Combine(tempDir, "testdir");
             string[] rdpFiles = Directory.GetFiles(subdir, "*.rdp").OrderBy(f => f).ToArray();
             int fileIndex = row.FileSel == "second" ? 1 : 0;
+            if (fileIndex >= rdpFiles.Length)
+            {
+                results.Add(Fail($"Expected at least {fileIndex + 1} .rdp file(s) in {subdir}, found {rdpFiles.Length}"));
+                return results;
+            }
             targetFile = rdpFiles[fileIndex];
 
             // Verify non-targeted file is untouched (byte-identical to its original fixture)
@@ -212,8 +216,8 @@ static class Assertions
                 int otherIndex = fileIndex == 0 ? 1 : 0;
                 // In directory setup, test1.rdp uses the rdpSettings fixture, test2.rdp is always test2.rdp
                 string otherFixture = Path.GetFileName(rdpFiles[otherIndex]) == "test2.rdp"
-                    ? Path.Combine(FixturesDir, "test2.rdp")
-                    : Path.Combine(FixturesDir, GetFixtureFileName(row.RdpSettings));
+                    ? Path.Combine(FixtureManager.FixturesDir, "test2.rdp")
+                    : Path.Combine(FixtureManager.FixturesDir, GetFixtureFileName(row.RdpSettings));
                 results.AddRange(AssertFileUnchanged(rdpFiles[otherIndex], otherFixture));
             }
         }
@@ -226,8 +230,8 @@ static class Assertions
             // Verify non-targeted file is byte-identical to its original fixture
             int otherIndex = fileIndex == 0 ? 1 : 0;
             string otherFixture = otherIndex == 0
-                ? Path.Combine(FixturesDir, GetFixtureFileName(row.RdpSettings))
-                : Path.Combine(FixturesDir, "test2.rdp");
+                ? Path.Combine(FixtureManager.FixturesDir, GetFixtureFileName(row.RdpSettings))
+                : Path.Combine(FixtureManager.FixturesDir, "test2.rdp");
             results.AddRange(AssertFileUnchanged(files[otherIndex], otherFixture));
         }
         else
@@ -246,6 +250,7 @@ static class Assertions
         if (rawBytes.Length < 2 || rawBytes[0] != 0xFF || rawBytes[1] != 0xFE)
         {
             results.Add(Fail($"File {targetFile} missing UTF-16 LE BOM"));
+            return results;
         }
 
         string[] lines = File.ReadAllLines(targetFile, Encoding.Unicode);
@@ -263,7 +268,7 @@ static class Assertions
         results.Add(AssertLineMatchCount(lines, "^winposstr:s:", 1, "winposstr"));
 
         // Verify exact winposstr value for synthetic monitors
-        if (row.Monitor != "real")
+        if (row.Monitor != TestCase.MonitorReal)
         {
             var mon = SyntheticMonitor.All[row.Monitor];
             string expectedWinposstr = ComputeExpectedWinposstr(row, mon, rdpW, rdpH);
@@ -275,9 +280,9 @@ static class Assertions
 
     static string GetFixtureFileName(string rdpSettings) => rdpSettings switch
     {
-        "all_present" => "test1.rdp",
-        "none_present" => "test2.rdp",
-        "partial" => "test1_partial.rdp",
+        "all_present" => FixtureManager.FixtureAllPresent,
+        "none_present" => FixtureManager.FixtureNonePresent,
+        "partial" => FixtureManager.FixturePartial,
         _ => throw new ArgumentException($"Unknown RdpSettings: {rdpSettings}")
     };
 
@@ -300,14 +305,14 @@ static class Assertions
         {
             var match = Regex.Match(modeStr, @"^(\d+)x(\d+)(?:@(\d+)Hz)?$");
             if (!match.Success)
-                return $"[ERROR: could not parse mode string \"{modeStr}\" in TestModesArg]";
+                throw new InvalidOperationException($"Could not parse mode string \"{modeStr}\" in TestModesArg");
             int modeW = int.Parse(match.Groups[1].Value);
             int modeH = int.Parse(match.Groups[2].Value);
             int modeFreq = match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : mon.Frequency;
             if (modeFreq != mon.Frequency) continue;
             if (modeH < minimumHeight) continue;
             double ratio = (double)modeW / modeH;
-            if (Math.Abs(ratio - monitorRatio) >= 0.001) continue;
+            if (Math.Abs(ratio - monitorRatio) >= RatioTolerance) continue;
             matchingModes.Add((modeW, modeH));
         }
 
@@ -321,14 +326,14 @@ static class Assertions
             int widthUsage = (int)Math.Round(winWidth / modeW * 100);
             int widthUsageTwo = (int)Math.Round(2 * winWidth / modeW * 100);
             int heightUsage = (int)Math.Round(winHeight / modeH * 100);
-            int areaOne = (int)Math.Round(widthUsage * heightUsage / 100.0);
+            int areaOne = (int)Math.Round(Math.Min(widthUsage, 100) * heightUsage / 100.0);
             int areaTwo = (int)Math.Round(Math.Min(widthUsageTwo, 100) * heightUsage / 100.0);
             monitorResolutions.Add((modeW, modeH, zoom, areaOne, areaTwo));
         }
 
         // Sort and pick the selected monitor resolution
         if (monitorResolutions.Count == 0)
-            return "[ERROR: no modes passed filtering for winposstr computation]";
+            throw new InvalidOperationException("No modes passed filtering for winposstr computation");
 
         (int selW, int selH, int selZoom, int, int) selectedMode;
         if (row.MonitorResSel == "one_window")
@@ -352,7 +357,7 @@ static class Assertions
         else // R
         {
             int x1 = selectedMode.selW - 1;
-            int x0 = x1 - winW;
+            int x0 = Math.Max(0, x1 - winW);
             return $"winposstr:s:0,1,{x0},0,{x1},{winH}";
         }
     }
@@ -378,28 +383,23 @@ static class Assertions
     {
         return result.ExitCode == expected
             ? Ok()
-            : Fail($"Expected exit code {expected}, got {result.ExitCode}. stderr: {result.Stderr}");
-    }
-
-    static AssertResult AssertNotExitCode(ProcessRunner.RunResult result, int notExpected)
-    {
-        return result.ExitCode != notExpected
-            ? Ok()
-            : Fail($"Expected exit code != {notExpected}, but got {result.ExitCode}. stderr: {result.Stderr}");
+            : Fail($"Expected exit code {expected}, got {result.ExitCode}. stdout: {result.Stdout}\nstderr: {result.Stderr}");
     }
 
     static AssertResult AssertContains(string text, string substring, string label)
     {
-        return text.Contains(substring)
-            ? Ok()
-            : Fail($"[{label}] Expected stdout to contain \"{substring}\"");
+        if (text.Contains(substring))
+            return Ok();
+        string excerpt = text.Length > 200 ? text[..200] + "..." : text;
+        return Fail($"[{label}] Expected to contain \"{substring}\"\nActual: {excerpt}");
     }
 
     static AssertResult AssertNotContains(string text, string substring, string label)
     {
-        return !text.Contains(substring)
-            ? Ok()
-            : Fail($"[{label}] Expected stdout NOT to contain \"{substring}\"");
+        if (!text.Contains(substring))
+            return Ok();
+        string excerpt = text.Length > 200 ? text[..200] + "..." : text;
+        return Fail($"[{label}] Expected NOT to contain \"{substring}\"\nActual: {excerpt}");
     }
 
     static AssertResult AssertLineCount(string[] lines, string exactLine, int expected, string label)

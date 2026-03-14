@@ -1,6 +1,12 @@
 static class TestCase
 {
     public const string PickerSelection = "3"; // entry 3 = 1280x720
+    public const string MonitorReal = "real";
+
+    public const string FixtureTest1 = "test1.rdp";
+    public const string FixtureTest2 = "test2.rdp";
+    public const string FixtureTestDir = "testdir";
+    public const string FixtureNonexistent = "nonexistent.rdp";
 
     public record PictRow(
         string Monitor,
@@ -26,18 +32,21 @@ static class TestCase
                 throw new InvalidDataException($"Line {i + 1}: expected 7 columns, got {cols.Length}. Raw line: {line}");
             rows.Add(new PictRow(cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6]));
         }
+        if (rows.Count == 0)
+            throw new InvalidDataException($"TSV file contains no data rows: {tsvPath}");
         return rows;
     }
 
-    public static string BuildCliArgs(PictRow row, string tempDir, string impl = "csharp")
+    public static string BuildCliArgs(PictRow row, string tempDir)
     {
         var args = new List<string>();
 
         // --test-monitor / --test-modes for synthetic monitors
         // -File mode passes args literally, no quoting needed for either impl
-        if (row.Monitor != "real")
+        if (row.Monitor != MonitorReal)
         {
-            var mon = SyntheticMonitor.All[row.Monitor];
+            if (!SyntheticMonitor.All.TryGetValue(row.Monitor, out var mon))
+                throw new InvalidOperationException($"Unknown monitor: {row.Monitor}");
             args.Add($"--test-monitor {mon.TestMonitorArg}");
             args.Add($"--test-modes {mon.TestModesArg}");
         }
@@ -62,17 +71,17 @@ static class TestCase
         switch (row.FileCount)
         {
             case FixtureManager.FileCountOne:
-                args.Add($"\"{Path.Combine(tempDir, "test1.rdp")}\"");
+                args.Add($"\"{Path.Combine(tempDir, FixtureTest1)}\"");
                 break;
             case FixtureManager.FileCountTwo:
-                args.Add($"\"{Path.Combine(tempDir, "test1.rdp")}\"");
-                args.Add($"\"{Path.Combine(tempDir, "test2.rdp")}\"");
+                args.Add($"\"{Path.Combine(tempDir, FixtureTest1)}\"");
+                args.Add($"\"{Path.Combine(tempDir, FixtureTest2)}\"");
                 break;
             case FixtureManager.FileCountDirectory:
-                args.Add($"\"{Path.Combine(tempDir, "testdir")}\"");
+                args.Add($"\"{Path.Combine(tempDir, FixtureTestDir)}\"");
                 break;
             case FixtureManager.FileCountNonexistent:
-                args.Add($"\"{Path.Combine(tempDir, "nonexistent.rdp")}\"");
+                args.Add($"\"{Path.Combine(tempDir, FixtureNonexistent)}\"");
                 break;
             // FileCountZero: no file args
             case FixtureManager.FileCountZero: break;
