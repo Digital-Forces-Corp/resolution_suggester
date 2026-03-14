@@ -9,6 +9,8 @@ $MaxZoom = 2
 $rdpWidth = 800
 $rdpHeight = 600
 $pathArgs = @()
+$testMonitor = $null
+$testModes = $null
 $argIndex = 0
 
 while ($argIndex -lt $Remaining.Count) {
@@ -60,7 +62,7 @@ while ($argIndex -lt $Remaining.Count) {
         $resNum = 0
         if (-not [int]::TryParse($resChoice, [ref]$resNum) -or $resNum -lt 1 -or $resNum -gt $commonResolutions.Count) {
             Write-Host "Invalid selection."
-            return
+            exit 1
         }
         $rdpWidth = $commonResolutions[$resNum - 1].W
         $rdpHeight = $commonResolutions[$resNum - 1].H
@@ -76,14 +78,14 @@ while ($argIndex -lt $Remaining.Count) {
             }
             else {
                 Write-Host "Invalid resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
-                return
+                exit 1
             }
         }
         elseif ($parts.Count -eq 2 -and $parts[1].Contains(':')) {
             $widthVal = 0
             if (-not [int]::TryParse($parts[0], [ref]$widthVal)) {
                 Write-Host "Invalid resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
-                return
+                exit 1
             }
             $rdpWidth = $widthVal
             $ratioParts = $parts[1] -split ':'
@@ -94,7 +96,7 @@ while ($argIndex -lt $Remaining.Count) {
             }
             else {
                 Write-Host "Invalid aspect ratio. Use N:D (e.g. 16:9, 4:3)."
-                return
+                exit 1
             }
         }
         elseif ($parts.Count -eq 2) {
@@ -106,13 +108,21 @@ while ($argIndex -lt $Remaining.Count) {
             }
             else {
                 Write-Host "Invalid resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
-                return
+                exit 1
             }
         }
         else {
             Write-Host "Invalid resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
             return
         }
+    }
+    elseif ($arg -eq '--test-monitor' -and $argIndex + 1 -lt $Remaining.Count) {
+        $argIndex++
+        $testMonitor = $Remaining[$argIndex]
+    }
+    elseif ($arg -eq '--test-modes' -and $argIndex + 1 -lt $Remaining.Count) {
+        $argIndex++
+        $testModes = $Remaining[$argIndex]
     }
     else {
         $pathArgs += $arg
@@ -130,6 +140,114 @@ foreach ($pathArg in $pathArgs) {
         $rdpPaths += $resolved
     }
 }
+
+function Get-Gcd([int]$a, [int]$b) { while ($b -ne 0) { $t = $b; $b = $a % $b; $a = $t } return $a }
+
+if ($testMonitor) {
+    # Parse --test-monitor: WxH@FHz@Ddpi (e.g. 2560x1440@60Hz@96dpi)
+    if ($testMonitor -notmatch '^(\d+)x(\d+)@(\d+)Hz@(\d+)dpi$') {
+        Write-Host "Invalid --test-monitor format. Use WxH@FHz@Ddpi (e.g. 2560x1440@60Hz@96dpi)."
+        exit 1
+    }
+    $currentWidth = [int]$Matches[1]
+    $currentHeight = [int]$Matches[2]
+    $currentFrequency = [int]$Matches[3]
+    $dpiX = [int]$Matches[4]
+    $dpiScale = $dpiX / 96.0
+    $chromeWidth = 14.0 * $dpiScale
+    $chromeHeight = (55.0 / 1.5) * $dpiScale
+    $minimumHeight = [int][Math]::Ceiling($rdpHeight + $chromeHeight)
+    $monitorNumber = "#0"
+
+    $ratioGcd = Get-Gcd $currentWidth $currentHeight
+    $currentRatioDisplay = "$($currentWidth / $ratioGcd):$($currentHeight / $ratioGcd)"
+    $currentRatio = [double]$currentWidth / $currentHeight
+
+    if (-not $testModes) {
+        Write-Host "--test-modes is required when --test-monitor is used."
+        exit 1
+    }
+
+    # Parse --test-modes and filter
+    $seen = @{}
+    $modes = @()
+    foreach ($modeStr in $testModes.Split(',')) {
+        if ($modeStr -notmatch '^(\d+)x(\d+)(?:@(\d+)Hz)?$') {
+            Write-Host "Invalid mode in --test-modes: $modeStr. Use WxH or WxH@FHz."
+            exit 1
+        }
+        $modeW = [int]$Matches[1]
+        $modeH = [int]$Matches[2]
+        $modeFreq = if ($Matches[3]) { [int]$Matches[3] } else { $currentFrequency }
+
+        if ($modeFreq -eq $currentFrequency -and $modeH -ge $minimumHeight -and $modeH -gt 0) {
+            $ratio = [double]$modeW / $modeH
+            if ([Math]::Abs($ratio - $currentRatio) -lt 0.001) {
+                $key = "${modeW}x${modeH}"
+                if (-not $seen.ContainsKey($key)) {
+                    $seen[$key] = $true
+                    $modes += @{ Width = $modeW; Height = $modeH }
+                }
+            }
+        }
+    }
+
+    # Derive height from monitor aspect ratio when only width was specified
+    if ($rdpHeight -eq 0) {
+        $rdpHeight = [int][Math]::Round($rdpWidth / $currentRatio)
+        $minimumHeight = [int][Math]::Ceiling($rdpHeight + $chromeHeight)
+
+        # Re-filter modes with updated minimumHeight
+        $filteredModes = @()
+        foreach ($mode in $modes) {
+            if ($mode.Height -ge $minimumHeight) {
+                $filteredModes += $mode
+            }
+        }
+        $modes = $filteredModes
+    }
+
+    # Compute scenarios for each mode
+    $computed = @()
+    foreach ($mode in $modes) {
+        $zoom = [Math]::Min([int][Math]::Floor(($mode.Height - $chromeHeight) / $rdpHeight), $MaxZoom)
+        $winWidth = $rdpWidth * $zoom + $chromeWidth
+        $winHeight = $rdpHeight * $zoom + $chromeHeight
+        $widthUsage = [int][Math]::Round($winWidth / $mode.Width * 100)
+        $widthUsageTwo = [int][Math]::Round(2 * $winWidth / $mode.Width * 100)
+        $heightUsage = [int][Math]::Round($winHeight / $mode.Height * 100)
+        $areaOne = [int][Math]::Truncate($widthUsage * $heightUsage / 100)
+        $areaTwo = [int][Math]::Truncate([Math]::Min($widthUsageTwo, 100) * $heightUsage / 100)
+
+        $computed += [PSCustomObject]@{
+            Width = $mode.Width
+            Height = $mode.Height
+            ZoomFactor = $zoom
+            WidthUsage = $widthUsage
+            WidthUsageTwo = $widthUsageTwo
+            HeightUsage = $heightUsage
+            AreaOnePercent = $areaOne
+            AreaTwoPercent = $areaTwo
+            IsCurrent = ($mode.Width -eq $currentWidth -and $mode.Height -eq $currentHeight)
+        }
+    }
+
+    $result = [PSCustomObject]@{
+        MonitorNumber = $monitorNumber
+        CurrentWidth = $currentWidth
+        CurrentHeight = $currentHeight
+        CurrentRatioDisplay = $currentRatioDisplay
+        CurrentRatio = $currentRatio
+        DpiScale = $dpiScale
+        CurrentFrequency = $currentFrequency
+        ChromeWidth = $chromeWidth
+        ChromeHeight = $chromeHeight
+        RdpWidth = $rdpWidth
+        RdpHeight = $rdpHeight
+        Computed = $computed
+    }
+}
+else {
 
 $source = @"
 using System;
@@ -378,8 +496,10 @@ if (-not ($typeName -as [type])) {
 $result = Invoke-Expression "[$typeName]::GetResolutionData($rdpWidth, $rdpHeight)"
 if ($result.Error) {
     Write-Host $result.Error
-    return
+    exit 1
 }
+
+} # end else (real monitor P/Invoke path)
 
 # Update rdpWidth/rdpHeight in case they were derived from monitor aspect ratio
 $rdpWidth = $result.RdpWidth
@@ -405,7 +525,7 @@ $scenarioNumber = 1
 
 # Display 1-window scenarios sorted by area
 $oneWindowSorted = @($result.Computed | Sort-Object -Property AreaOnePercent -Descending)
-Write-Host "`n--- Resolutions for 1 $rdpLabel with same ratio and frequency sorted by area used ---"
+Write-Host "`n--- Available resolutions for 1 $rdpLabel with same ratio and frequency sorted by area used ---"
 foreach ($res in $oneWindowSorted) {
     $marker = if ($res.IsCurrent) { "*" } else { "" }
     $prefix = if ($interactive) { "  $scenarioNumber. " } else { "" }
@@ -416,7 +536,7 @@ foreach ($res in $oneWindowSorted) {
 
 # Display 2-window scenarios sorted by area
 $twoWindowSorted = @($result.Computed | Sort-Object -Property AreaTwoPercent -Descending)
-Write-Host "`n--- Resolutions for 2 $rdpLabel with same ratio and frequency sorted by area used ---"
+Write-Host "`n--- Available resolutions for 2 $rdpLabel with same ratio and frequency sorted by area used ---"
 foreach ($res in $twoWindowSorted) {
     $marker = if ($res.IsCurrent) { "*" } else { "" }
     $widthCapped = [Math]::Min($res.WidthUsageTwo, 100)
@@ -438,7 +558,7 @@ $choiceText = [Console]::In.ReadLine()
 $choiceNum = 0
 if (-not [int]::TryParse($choiceText, [ref]$choiceNum) -or $choiceNum -lt 1 -or $choiceNum -gt $scenarios.Count) {
     Write-Host "Invalid selection."
-    return
+    exit 1
 }
 $selected = $scenarios[$choiceNum - 1]
 $selectedRes = $selected.Resolution
@@ -455,7 +575,7 @@ if ($rdpPaths.Count -gt 1) {
     $rdpChoiceNum = 0
     if (-not [int]::TryParse($rdpChoiceText, [ref]$rdpChoiceNum) -or $rdpChoiceNum -lt 1 -or $rdpChoiceNum -gt $rdpPaths.Count) {
         Write-Host "Invalid selection."
-        return
+        exit 1
     }
     $targetPath = $rdpPaths[$rdpChoiceNum - 1]
 }
@@ -465,7 +585,7 @@ Write-Host "Left or Right? (L/R): " -NoNewline
 $side = [Console]::In.ReadLine().Trim().ToUpper()
 if ($side -ne 'L' -and $side -ne 'R') {
     Write-Host "Invalid selection."
-    return
+    exit 1
 }
 
 # Compute winposstr for the selected resolution and position
