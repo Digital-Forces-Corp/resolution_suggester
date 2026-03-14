@@ -131,39 +131,123 @@ foreach (string pathArg in pathArgs)
     }
 }
 
-// Detect monitor
-NativeMethods.SetProcessDpiAwareness(2); // PROCESS_PER_MONITOR_DPI_AWARE
+// Detect monitor (or use synthetic data for testing)
+string monitorNumber;
+int currentWidth, currentHeight, currentFrequency;
+double dpiScale, chromeWidth, chromeHeight;
+int minimumHeight;
+var seen = new HashSet<string>();
+var modes = new List<(int Width, int Height)>();
 
-IntPtr consoleHandle = NativeMethods.GetConsoleWindow();
-IntPtr monitorHandle = NativeMethods.MonitorFromWindow(consoleHandle, 2); // MONITOR_DEFAULTTONEAREST
-
-var monitorInfo = new NativeMethods.MONITORINFOEX();
-monitorInfo.cbSize = Marshal.SizeOf(monitorInfo);
-if (!NativeMethods.GetMonitorInfo(monitorHandle, ref monitorInfo))
+if (testMonitor != null)
 {
-    Console.WriteLine("ERROR: Failed to retrieve monitor info.");
-    return 1;
+    // Parse --test-monitor: WxH@FHz@Ddpi (e.g. 2560x1440@60Hz@96dpi)
+    var tmMatch = Regex.Match(testMonitor, @"^(\d+)x(\d+)@(\d+)Hz@(\d+)dpi$");
+    if (!tmMatch.Success)
+    {
+        Console.WriteLine("Invalid --test-monitor format. Use WxH@FHz@Ddpi (e.g. 2560x1440@60Hz@96dpi).");
+        return 1;
+    }
+    currentWidth = int.Parse(tmMatch.Groups[1].Value);
+    currentHeight = int.Parse(tmMatch.Groups[2].Value);
+    currentFrequency = int.Parse(tmMatch.Groups[3].Value);
+    uint dpiX = uint.Parse(tmMatch.Groups[4].Value);
+    dpiScale = dpiX / 96.0;
+    chromeWidth = ChromeWidth96Dpi * dpiScale;
+    chromeHeight = ChromeHeight96Dpi * dpiScale;
+    minimumHeight = (int)Math.Ceiling(rdpHeight + chromeHeight);
+    monitorNumber = "#0";
+
+    // Parse --test-modes: WxH,WxH@FHz,... (frequency defaults to currentFrequency if omitted)
+    if (testModes == null)
+    {
+        Console.WriteLine("--test-modes is required when --test-monitor is used.");
+        return 1;
+    }
+    foreach (string modeStr in testModes.Split(','))
+    {
+        var modeMatch = Regex.Match(modeStr, @"^(\d+)x(\d+)(?:@(\d+)Hz)?$");
+        if (!modeMatch.Success)
+        {
+            Console.WriteLine($"Invalid mode in --test-modes: {modeStr}. Use WxH or WxH@FHz.");
+            return 1;
+        }
+        int modeW = int.Parse(modeMatch.Groups[1].Value);
+        int modeH = int.Parse(modeMatch.Groups[2].Value);
+        int modeFreq = modeMatch.Groups[3].Success ? int.Parse(modeMatch.Groups[3].Value) : currentFrequency;
+
+        // Feed into the same filtering logic the real path uses
+        if (modeFreq == currentFrequency && modeH >= minimumHeight && modeH > 0)
+        {
+            double ratio = (double)modeW / modeH;
+            double currentRatioCheck = (double)currentWidth / currentHeight;
+            if (Math.Abs(ratio - currentRatioCheck) < 0.001)
+            {
+                string key = $"{modeW}x{modeH}";
+                if (seen.Add(key))
+                {
+                    modes.Add((modeW, modeH));
+                }
+            }
+        }
+    }
+}
+else
+{
+    NativeMethods.SetProcessDpiAwareness(2); // PROCESS_PER_MONITOR_DPI_AWARE
+
+    IntPtr consoleHandle = NativeMethods.GetConsoleWindow();
+    IntPtr monitorHandle = NativeMethods.MonitorFromWindow(consoleHandle, 2); // MONITOR_DEFAULTTONEAREST
+
+    var monitorInfo = new NativeMethods.MONITORINFOEX();
+    monitorInfo.cbSize = Marshal.SizeOf(monitorInfo);
+    if (!NativeMethods.GetMonitorInfo(monitorHandle, ref monitorInfo))
+    {
+        Console.WriteLine("ERROR: Failed to retrieve monitor info.");
+        return 1;
+    }
+
+    string deviceName = monitorInfo.szDevice;
+    monitorNumber = deviceName.Replace("\\\\.\\DISPLAY", "#");
+
+    var currentSettings = new NativeMethods.DEVMODE();
+    if (!NativeMethods.EnumDisplaySettings(deviceName, -1, ref currentSettings) || currentSettings.dmPelsHeight == 0)
+    {
+        Console.WriteLine($"ERROR: Failed to retrieve display settings for {deviceName}");
+        return 1;
+    }
+
+    NativeMethods.GetDpiForMonitor(monitorHandle, 0, out uint dpiX, out _); // MDT_EFFECTIVE_DPI
+    dpiScale = dpiX / 96.0;
+    chromeWidth = ChromeWidth96Dpi * dpiScale;
+    chromeHeight = ChromeHeight96Dpi * dpiScale;
+    minimumHeight = (int)Math.Ceiling(rdpHeight + chromeHeight);
+
+    currentFrequency = currentSettings.dmDisplayFrequency;
+    currentWidth = currentSettings.dmPelsWidth;
+    currentHeight = currentSettings.dmPelsHeight;
+
+    var devMode = new NativeMethods.DEVMODE();
+    int modeIndex = 0;
+    while (NativeMethods.EnumDisplaySettings(deviceName, modeIndex, ref devMode))
+    {
+        if (devMode.dmDisplayFrequency == currentFrequency && devMode.dmPelsHeight >= minimumHeight && devMode.dmPelsHeight > 0)
+        {
+            double ratio = (double)devMode.dmPelsWidth / devMode.dmPelsHeight;
+            double currentRatioCheck = (double)currentWidth / currentHeight;
+            if (Math.Abs(ratio - currentRatioCheck) < 0.001)
+            {
+                string key = $"{devMode.dmPelsWidth}x{devMode.dmPelsHeight}";
+                if (seen.Add(key))
+                {
+                    modes.Add((devMode.dmPelsWidth, devMode.dmPelsHeight));
+                }
+            }
+        }
+        modeIndex++;
+    }
 }
 
-string deviceName = monitorInfo.szDevice;
-string monitorNumber = deviceName.Replace("\\\\.\\DISPLAY", "#");
-
-var currentSettings = new NativeMethods.DEVMODE();
-if (!NativeMethods.EnumDisplaySettings(deviceName, -1, ref currentSettings) || currentSettings.dmPelsHeight == 0)
-{
-    Console.WriteLine($"ERROR: Failed to retrieve display settings for {deviceName}");
-    return 1;
-}
-
-NativeMethods.GetDpiForMonitor(monitorHandle, 0, out uint dpiX, out _); // MDT_EFFECTIVE_DPI
-double dpiScale = dpiX / 96.0;
-double chromeWidth = ChromeWidth96Dpi * dpiScale;
-double chromeHeight = ChromeHeight96Dpi * dpiScale;
-int minimumHeight = (int)Math.Ceiling(rdpHeight + chromeHeight);
-
-int currentFrequency = currentSettings.dmDisplayFrequency;
-int currentWidth = currentSettings.dmPelsWidth;
-int currentHeight = currentSettings.dmPelsHeight;
 int ratioGcd = Gcd(currentWidth, currentHeight);
 string currentRatioDisplay = $"{currentWidth / ratioGcd}:{currentHeight / ratioGcd}";
 double currentRatio = (double)currentWidth / currentHeight;
@@ -173,29 +257,18 @@ if (rdpHeight == 0)
 {
     rdpHeight = (int)Math.Round(rdpWidth / currentRatio);
     minimumHeight = (int)Math.Ceiling(rdpHeight + chromeHeight);
-}
 
-// Enumerate available display modes
-var seen = new HashSet<string>();
-var modes = new List<(int Width, int Height)>();
-var devMode = new NativeMethods.DEVMODE();
-int modeIndex = 0;
-
-while (NativeMethods.EnumDisplaySettings(deviceName, modeIndex, ref devMode))
-{
-    if (devMode.dmDisplayFrequency == currentFrequency && devMode.dmPelsHeight >= minimumHeight && devMode.dmPelsHeight > 0)
+    // Re-filter modes with updated minimumHeight (synthetic path only; real path already filtered)
+    if (testMonitor != null)
     {
-        double ratio = (double)devMode.dmPelsWidth / devMode.dmPelsHeight;
-        if (Math.Abs(ratio - currentRatio) < 0.001)
+        var filteredModes = new List<(int Width, int Height)>();
+        foreach (var mode in modes)
         {
-            string key = $"{devMode.dmPelsWidth}x{devMode.dmPelsHeight}";
-            if (seen.Add(key))
-            {
-                modes.Add((devMode.dmPelsWidth, devMode.dmPelsHeight));
-            }
+            if (mode.Height >= minimumHeight)
+                filteredModes.Add(mode);
         }
+        modes = filteredModes;
     }
-    modeIndex++;
 }
 
 // Compute scenarios for each mode
