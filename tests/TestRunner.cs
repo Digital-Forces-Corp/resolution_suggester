@@ -72,7 +72,7 @@ static int RunTestSuite(
     for (int i = 0; i < rows.Count; i++)
     {
         var row = rows[i];
-        string label = $"[{i + 1}/{rows.Count}] {row.Monitor} | {row.ResolutionArg} | {row.ScenarioSel} | {row.Side} | {row.FileCount} | {row.FileSel} | {row.RdpSettings}";
+        string label = $"[{i + 1}/{rows.Count}] {row.Monitor} | {row.ResolutionArg} | {row.MonitorResSel} | {row.Side} | {row.FileCount} | {row.FileSel} | {row.RdpSettings}";
 
         // Skip real monitor tests if no monitor detected
         if (row.Monitor == "real" && realMonitor == null)
@@ -93,13 +93,13 @@ static int RunTestSuite(
             string? stdin = TestCase.BuildStdin(row);
 
             // Resolve TWO_WINDOW_FIRST placeholder:
-            // Run a non-interactive dry run to count one-window scenarios, then use count + 1.
+            // Run a non-interactive dry run to count one-window options, then use count + 1.
             if (stdin != null && stdin.Contains("TWO_WINDOW_FIRST"))
             {
                 string dryArgs = TestCase.BuildCliArgs(row with { FileCount = "zero" }, tempDir, impl);
                 string? dryStdin = row.ResolutionArg == "picker" ? "3\n" : null;
                 var dryResult = RunImpl(impl, exePath, ps1Path, dryArgs, dryStdin);
-                int oneWindowCount = CountScenarioLines(dryResult.Stdout, "1 RDP");
+                int oneWindowCount = CountOptionLines(dryResult.Stdout, "1 RDP");
                 stdin = stdin.Replace("TWO_WINDOW_FIRST", (oneWindowCount + 1).ToString());
             }
 
@@ -145,7 +145,7 @@ static int RunTestSuite(
         Console.WriteLine("=== FAILURES ===");
         foreach (var (index, row, results) in failures)
         {
-            Console.WriteLine($"\n  Test {index}: {row.Monitor} | {row.ResolutionArg} | {row.ScenarioSel} | {row.Side} | {row.FileCount} | {row.FileSel} | {row.RdpSettings}");
+            Console.WriteLine($"\n  Test {index}: {row.Monitor} | {row.ResolutionArg} | {row.MonitorResSel} | {row.Side} | {row.FileCount} | {row.FileSel} | {row.RdpSettings}");
             foreach (var r in results.Where(r => !r.Passed))
                 Console.WriteLine($"    {r.Message}");
         }
@@ -165,14 +165,14 @@ static ProcessRunner.RunResult RunImpl(string impl, string exePath, string ps1Pa
     return ProcessRunner.Run(exePath, args, stdin);
 }
 
-static int CountScenarioLines(string stdout, string sectionMarker)
+static int CountOptionLines(string stdout, string sectionMarker)
 {
     var lines = stdout.Split('\n');
     bool inSection = false;
     int count = 0;
     foreach (string line in lines)
     {
-        if (line.Contains($"--- Resolutions for {sectionMarker}"))
+        if (line.Contains($"--- Available monitor resolutions for {sectionMarker}"))
         {
             inSection = true;
             continue;

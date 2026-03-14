@@ -32,7 +32,7 @@ static class Assertions
         if (row.ResolutionArg == "invalid_format")
         {
             results.Add(AssertExitCode(result, 1));
-            results.Add(AssertContains(result.Stdout, "Invalid resolution format", "invalid format error"));
+            results.Add(AssertContains(result.Stdout, "Invalid RDP resolution format", "invalid format error"));
             return results;
         }
         if (row.ResolutionArg == "invalid_ratio")
@@ -49,11 +49,11 @@ static class Assertions
             return results;
         }
 
-        // --- Invalid scenario ---
-        if (row.ScenarioSel == "invalid_scenario")
+        // --- Invalid selection ---
+        if (row.MonitorResSel == "invalid_selection")
         {
             results.Add(AssertExitCode(result, 1));
-            results.Add(AssertContains(result.Stdout, "Invalid selection.", "invalid scenario"));
+            results.Add(AssertContains(result.Stdout, "Invalid selection.", "invalid selection"));
             return results;
         }
 
@@ -92,14 +92,14 @@ static class Assertions
             string expectedHeader = $"Current Monitor #0, {mon.Width}x{mon.Height}, Ratio: 16:9, Frequency: {mon.Frequency}Hz, DPI Scale {expectedDpi}%";
             results.Add(AssertContains(result.Stdout, expectedHeader, "synthetic header"));
 
-            // Noise modes must not appear in scenario output
+            // Noise modes must not appear in monitor resolution output
             // Skip when picker is active (picker menu lists common resolutions that match noise dimensions)
             if (row.ResolutionArg != "picker")
             {
                 foreach (string noise in mon.NoiseModes)
                 {
                     string noiseDimensions = noise.Split('@')[0]; // strip frequency qualifier
-                    // Skip noise check if dimensions match monitor resolution (they naturally appear in header/scenarios)
+                    // Skip noise check if dimensions match monitor resolution (they naturally appear in header/monitor resolution lists)
                     if (noiseDimensions == $"{mon.Width}x{mon.Height}")
                         continue;
                     results.Add(AssertNotContains(result.Stdout, noiseDimensions, $"noise mode {noise}"));
@@ -247,9 +247,9 @@ static class Assertions
         double chromeW = ChromeWidth96Dpi * dpiScale;
         double chromeH = ChromeHeight96Dpi * dpiScale;
 
-        // For the selected scenario, we need to know which mode was selected.
-        // Parse the scenario from stdout to get the mode dimensions.
-        // (Simplified: for one_window pick first scenario, for two_window pick first two-window scenario)
+        // For the selected monitor resolution, we need to know which mode was selected.
+        // Parse the selection from stdout to get the mode dimensions.
+        // (Simplified: for one_window pick first option, for two_window pick first two-window option)
         // This is handled by the stdout parsing below.
 
         // Check required settings exist exactly once
@@ -286,8 +286,8 @@ static class Assertions
         double chromeW = ChromeWidth96Dpi * dpiScale;
         double chromeH = ChromeHeight96Dpi * dpiScale;
 
-        // Determine which mode was selected (scenario 1 = first mode by area for one_window, etc.)
-        // The selected mode is the first entry in the sorted scenario list.
+        // Determine which mode was selected (option 1 = first mode by area for one_window, etc.)
+        // The selected mode is the first entry in the sorted option list.
         // For simplicity, compute all modes' area and pick the right one.
         var matchingModes = new List<(int W, int H)>();
         double monitorRatio = (double)mon.Width / mon.Height;
@@ -306,8 +306,8 @@ static class Assertions
             matchingModes.Add((modeW, modeH));
         }
 
-        // Compute scenario info for each mode
-        var scenarios = new List<(int W, int H, int Zoom, int AreaOne, int AreaTwo)>();
+        // Compute monitor resolution info for each mode
+        var monitorResolutions = new List<(int W, int H, int Zoom, int AreaOne, int AreaTwo)>();
         foreach (var (modeW, modeH) in matchingModes)
         {
             int zoom = Math.Min((int)Math.Floor((modeH - chromeH) / rdpH), MaxZoom);
@@ -318,20 +318,20 @@ static class Assertions
             int heightUsage = (int)Math.Round(winHeight / modeH * 100);
             int areaOne = widthUsage * heightUsage / 100;
             int areaTwo = Math.Min(widthUsageTwo, 100) * heightUsage / 100;
-            scenarios.Add((modeW, modeH, zoom, areaOne, areaTwo));
+            monitorResolutions.Add((modeW, modeH, zoom, areaOne, areaTwo));
         }
 
-        // Sort and pick the selected scenario
+        // Sort and pick the selected monitor resolution
         (int selW, int selH, int selZoom, int, int) selectedMode;
-        if (row.ScenarioSel == "one_window")
+        if (row.MonitorResSel == "one_window")
         {
-            // Scenario 1 = first by area descending (one-window)
-            selectedMode = scenarios.OrderByDescending(s => s.AreaOne).First();
+            // Option 1 = first by area descending (one-window)
+            selectedMode = monitorResolutions.OrderByDescending(s => s.AreaOne).First();
         }
         else
         {
             // Two-window: first by AreaTwo descending
-            selectedMode = scenarios.OrderByDescending(s => s.AreaTwo).First();
+            selectedMode = monitorResolutions.OrderByDescending(s => s.AreaTwo).First();
         }
 
         int winW = (int)Math.Ceiling(rdpW * selectedMode.selZoom + chromeW);

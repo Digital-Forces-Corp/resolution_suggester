@@ -18,6 +18,12 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Build and test
+        run: |
+          dotnet build src/resolution_suggester.csproj
+          dotnet build tests/ResolutionSuggesterTests.csproj
+          dotnet run --project tests/ResolutionSuggesterTests.csproj
+
       - name: Publish
         run: dotnet publish src/resolution_suggester.csproj -c Release -o publish
 

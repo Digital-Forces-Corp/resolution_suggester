@@ -30,8 +30,10 @@ static class ProcessRunner
             process.StandardInput.Close();
         }
 
+        // Read stderr asynchronously to avoid pipe-buffer deadlock
+        var stderrTask = Task.Run(() => process.StandardError.ReadToEnd());
         string stdout = process.StandardOutput.ReadToEnd();
-        string stderr = process.StandardError.ReadToEnd();
+        string stderr = stderrTask.Result;
 
         if (!process.WaitForExit(timeoutMs))
         {

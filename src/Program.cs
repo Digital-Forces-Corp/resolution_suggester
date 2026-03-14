@@ -10,7 +10,7 @@ const int MaxZoom = 2;
 const double ChromeWidth96Dpi = 14.0;
 const double ChromeHeight96Dpi = 55.0 / 1.5;
 
-// Parse arguments: resolution_suggester [--resolution WxH] [paths...]
+// Parse arguments: resolution_suggester [--rdp-resolution WxH] [paths...]
 int rdpWidth = 800;
 int rdpHeight = 600;
 var pathArgs = new List<string>();
@@ -24,7 +24,7 @@ for (int argIndex = 0; argIndex < args.Length; argIndex++)
         Console.WriteLine("Usage: resolution_suggester [-r WxH|W|WxN:D] [paths...]");
         Console.WriteLine();
         Console.WriteLine("Options:");
-        Console.WriteLine("  --resolution, -r  RDP resolution (default: 800x600)");
+        Console.WriteLine("  --rdp-resolution, -r  RDP resolution (default: 800x600)");
         Console.WriteLine("                    WxH       explicit (e.g. 800x600, 1280x1024)");
         Console.WriteLine("                    W         width-only, height from monitor aspect ratio (e.g. 1280)");
         Console.WriteLine("                    WxN:D     width with aspect ratio (e.g. 1280x4:3)");
@@ -33,12 +33,12 @@ for (int argIndex = 0; argIndex < args.Length; argIndex++)
         Console.WriteLine("Arguments:");
         Console.WriteLine("  paths              .rdp files or directories containing .rdp files");
         Console.WriteLine("                     When provided, enables interactive mode to update");
-        Console.WriteLine("                     winposstr and resolution settings in the .rdp file");
+        Console.WriteLine("                     winposstr and RDP resolution settings in the .rdp file");
         return 0;
     }
-    else if ((args[argIndex] == "--resolution" || args[argIndex] == "-r") && (argIndex + 1 >= args.Length || args[argIndex + 1].StartsWith("-")))
+    else if ((args[argIndex] == "--rdp-resolution" || args[argIndex] == "-r") && argIndex + 1 >= args.Length)
     {
-        var commonResolutions = new (int W, int H, string Ratio, string Name)[]
+        var commonRdpResolutions = new (int W, int H, string Ratio, string Name)[]
         {
             (800,  600,  "4:3",   "SVGA"),
             (1024, 768,  "4:3",   "XGA"),
@@ -57,22 +57,22 @@ for (int argIndex = 0; argIndex < args.Length; argIndex++)
             (2560, 1600, "16:10", "WQXGA"),
         };
         Console.WriteLine("Common resolutions:");
-        for (int i = 0; i < commonResolutions.Length; i++)
+        for (int i = 0; i < commonRdpResolutions.Length; i++)
         {
-            var r = commonResolutions[i];
+            var r = commonRdpResolutions[i];
             Console.WriteLine($"  {i + 1,2}. {r.W}x{r.H,-5} {r.Ratio,-5}  {r.Name}");
         }
-        Console.Write("Select resolution: ");
+        Console.Write("Select RDP resolution: ");
         string? resChoice = Console.ReadLine();
-        if (!int.TryParse(resChoice, out int resNum) || resNum < 1 || resNum > commonResolutions.Length)
+        if (!int.TryParse(resChoice, out int resNum) || resNum < 1 || resNum > commonRdpResolutions.Length)
         {
             Console.WriteLine("Invalid selection.");
             return 1;
         }
-        rdpWidth = commonResolutions[resNum - 1].W;
-        rdpHeight = commonResolutions[resNum - 1].H;
+        rdpWidth = commonRdpResolutions[resNum - 1].W;
+        rdpHeight = commonRdpResolutions[resNum - 1].H;
     }
-    else if (args[argIndex] == "--resolution" || args[argIndex] == "-r")
+    else if (args[argIndex] == "--rdp-resolution" || args[argIndex] == "-r")
     {
         argIndex++;
         string[] parts = args[argIndex].Split('x');
@@ -96,7 +96,7 @@ for (int argIndex = 0; argIndex < args.Length; argIndex++)
         }
         else if (parts.Length != 2 || !int.TryParse(parts[0], out rdpWidth) || !int.TryParse(parts[1], out rdpHeight))
         {
-            Console.WriteLine("Invalid resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3).");
+            Console.WriteLine("Invalid RDP resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3).");
             return 1;
         }
     }
@@ -258,21 +258,18 @@ if (rdpHeight == 0)
     rdpHeight = (int)Math.Round(rdpWidth / currentRatio);
     minimumHeight = (int)Math.Ceiling(rdpHeight + chromeHeight);
 
-    // Re-filter modes with updated minimumHeight (synthetic path only; real path already filtered)
-    if (testMonitor != null)
+    // Re-filter modes with updated minimumHeight
+    var filteredModes = new List<(int Width, int Height)>();
+    foreach (var mode in modes)
     {
-        var filteredModes = new List<(int Width, int Height)>();
-        foreach (var mode in modes)
-        {
-            if (mode.Height >= minimumHeight)
-                filteredModes.Add(mode);
-        }
-        modes = filteredModes;
+        if (mode.Height >= minimumHeight)
+            filteredModes.Add(mode);
     }
+    modes = filteredModes;
 }
 
-// Compute scenarios for each mode
-var computed = new List<ResolutionInfo>();
+// Compute monitor resolution options for each mode
+var computed = new List<MonitorResolution>();
 foreach (var mode in modes)
 {
     int zoomFactor = Math.Min((int)Math.Floor((mode.Height - chromeHeight) / rdpHeight), MaxZoom);
@@ -284,7 +281,7 @@ foreach (var mode in modes)
     int areaOne = widthUsage * heightUsage;
     int areaTwo = Math.Min(widthUsageTwo, 100) * heightUsage;
 
-    computed.Add(new ResolutionInfo
+    computed.Add(new MonitorResolution
     {
         Width = mode.Width,
         Height = mode.Height,
@@ -302,7 +299,7 @@ foreach (var mode in modes)
 string dpiPercent = (dpiScale * 100).ToString("F0");
 Console.WriteLine($"Current Monitor {monitorNumber}, {currentWidth}x{currentHeight}, Ratio: {currentRatioDisplay}, Frequency: {currentFrequency}Hz, DPI Scale {dpiPercent}%");
 
-// Display winposstr reference for current resolution at each zoom level
+// Display winposstr reference for current monitor resolution at each zoom level
 string rdpLabel = $"RDP {rdpWidth}x{rdpHeight}";
 for (int zoom = 1; zoom <= MaxZoom; zoom++)
 {
@@ -314,48 +311,48 @@ for (int zoom = 1; zoom <= MaxZoom; zoom++)
 }
 
 bool interactive = rdpPaths.Count > 0;
-var scenarios = new List<(ResolutionInfo Resolution, string Type)>();
-int scenarioNumber = 1;
+var monitorResolutions = new List<MonitorResolution>();
+int optionNumber = 1;
 
-// Display 1-window scenarios sorted by area
+// Display 1-window options sorted by area
 var oneWindowSorted = computed.OrderByDescending(r => r.AreaOnePercent).ToList();
-Console.WriteLine($"\n--- Available resolutions for 1 {rdpLabel} with same ratio and frequency sorted by area used ---");
+Console.WriteLine($"\n--- Available monitor resolutions for 1 {rdpLabel} with same ratio and frequency sorted by area used ---");
 foreach (var res in oneWindowSorted)
 {
     string marker = res.IsCurrent ? "*" : "";
-    string prefix = interactive ? $"  {scenarioNumber}. " : "";
+    string prefix = interactive ? $"  {optionNumber}. " : "";
     Console.WriteLine($"{prefix}{marker}{res.Width}x{res.Height}, {res.AreaOnePercent}% area ({res.WidthUsage}% width, {res.HeightUsage}% height), {res.ZoomFactor * 100}% rdp zoom");
-    scenarios.Add((res, "1-window"));
-    scenarioNumber++;
+    monitorResolutions.Add(res);
+    optionNumber++;
 }
 
-// Display 2-window scenarios sorted by area
+// Display 2-window options sorted by area
 var twoWindowSorted = computed.OrderByDescending(r => r.AreaTwoPercent).ToList();
-Console.WriteLine($"\n--- Available resolutions for 2 {rdpLabel} with same ratio and frequency sorted by area used ---");
+Console.WriteLine($"\n--- Available monitor resolutions for 2 {rdpLabel} with same ratio and frequency sorted by area used ---");
 foreach (var res in twoWindowSorted)
 {
     string marker = res.IsCurrent ? "*" : "";
     int widthCapped = Math.Min(res.WidthUsageTwo, 100);
     string overlapNote = res.WidthUsageTwo > 100 ? $", {res.WidthUsageTwo - 100}% overlap" : "";
-    string prefix = interactive ? $"  {scenarioNumber}. " : "";
+    string prefix = interactive ? $"  {optionNumber}. " : "";
     Console.WriteLine($"{prefix}{marker}{res.Width}x{res.Height}, {res.AreaTwoPercent}% area ({widthCapped}% width, {res.HeightUsage}% height{overlapNote}), {res.ZoomFactor * 100}% rdp zoom");
-    scenarios.Add((res, "2-window"));
-    scenarioNumber++;
+    monitorResolutions.Add(res);
+    optionNumber++;
 }
 
 if (!interactive)
     return 0;
 
-// Interactive mode: select scenario, rdp file, and position
+// Interactive mode: select monitor resolution, rdp file, and position
 Console.WriteLine();
-Console.Write("Select scenario number: ");
+Console.Write("Select monitor resolution: ");
 string? choiceText = Console.ReadLine();
-if (!int.TryParse(choiceText, out int choiceNum) || choiceNum < 1 || choiceNum > scenarios.Count)
+if (!int.TryParse(choiceText, out int choiceNum) || choiceNum < 1 || choiceNum > monitorResolutions.Count)
 {
     Console.WriteLine("Invalid selection.");
     return 1;
 }
-var selectedRes = scenarios[choiceNum - 1].Resolution;
+var monitorResolutionSelected = monitorResolutions[choiceNum - 1];
 
 // If multiple RDP files, ask which one
 string targetPath = rdpPaths[0];
@@ -385,9 +382,9 @@ if (side != "L" && side != "R")
     return 1;
 }
 
-// Compute winposstr for the selected resolution and position
-int selectedWinW = (int)Math.Ceiling(rdpWidth * selectedRes.ZoomFactor + chromeWidth);
-int selectedWinH = (int)Math.Ceiling(rdpHeight * selectedRes.ZoomFactor + chromeHeight);
+// Compute winposstr for the selected monitor resolution and position
+int selectedWinW = (int)Math.Ceiling(rdpWidth * monitorResolutionSelected.ZoomFactor + chromeWidth);
+int selectedWinH = (int)Math.Ceiling(rdpHeight * monitorResolutionSelected.ZoomFactor + chromeHeight);
 string winposstr;
 if (side == "L")
 {
@@ -395,7 +392,7 @@ if (side == "L")
 }
 else
 {
-    int sx1 = selectedRes.Width - 1;
+    int sx1 = monitorResolutionSelected.Width - 1;
     int sx0 = sx1 - selectedWinW;
     winposstr = $"winposstr:s:0,1,{sx0},0,{sx1},{selectedWinH}";
 }
@@ -440,7 +437,7 @@ static int Gcd(int a, int b)
     return a;
 }
 
-class ResolutionInfo
+class MonitorResolution
 {
     public int Width;
     public int Height;

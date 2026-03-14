@@ -1,0 +1,45 @@
+# Pairwise test model for resolution_suggester
+# Factors and their values
+
+Monitor:        real, synth_2560x1440_96dpi, synth_2560x1440_192dpi, synth_1920x1080_96dpi, synth_1920x1080_192dpi
+ResolutionArg:  default, explicit_WxH, width_only, WxN_D, picker, help, invalid_format, invalid_ratio
+MonitorResSel:    one_window, two_window, invalid_selection
+Side:           L, R, invalid_side
+FileCount:      zero, one, two, directory, nonexistent
+FileSel:        first, second, invalid_file
+RdpSettings:    all_present, none_present, partial
+
+# Constraints
+
+# --help, invalid_format, invalid_ratio don't reach interactive flow
+IF [ResolutionArg] = "help"           THEN [MonitorResSel] = "one_window" AND [Side] = "L" AND [FileCount] = "zero" AND [FileSel] = "first" AND [RdpSettings] = "all_present";
+IF [ResolutionArg] = "invalid_format" THEN [MonitorResSel] = "one_window" AND [Side] = "L" AND [FileCount] = "zero" AND [FileSel] = "first" AND [RdpSettings] = "all_present";
+IF [ResolutionArg] = "invalid_ratio"  THEN [MonitorResSel] = "one_window" AND [Side] = "L" AND [FileCount] = "zero" AND [FileSel] = "first" AND [RdpSettings] = "all_present";
+
+# zero files = non-interactive, no scenario/side/file prompts matter
+IF [FileCount] = "zero" THEN [MonitorResSel] = "one_window" AND [Side] = "L" AND [FileSel] = "first";
+
+# nonexistent file: all interactive prompts complete, crash at File.ReadAllLines after
+# so interactive factors vary normally; only FileSel locked (single nonexistent file)
+IF [FileCount] = "nonexistent" THEN [FileSel] = "first";
+
+# file selection prompt only appears with two+ files
+IF [FileCount] IN {"one", "nonexistent"} THEN [FileSel] = "first";
+
+# invalid scenario exits before file/side prompts
+IF [MonitorResSel] = "invalid_selection" THEN [Side] = "L" AND [FileSel] = "first";
+
+# invalid side exits before file write
+IF [Side] = "invalid_side" THEN [FileSel] = "first";
+
+# invalid file selection only possible with two+ files
+IF [FileSel] IN {"second", "invalid_file"} THEN [FileCount] IN {"two", "directory"};
+
+# RdpSettings irrelevant when no file is written
+IF [FileCount] = "zero" THEN [RdpSettings] = "all_present";
+IF [FileCount] = "nonexistent" THEN [RdpSettings] = "all_present";
+
+# invalid_selection exits before side prompt, but nonexistent still reaches File.ReadAllLines
+# so only lock side/file for invalid_selection regardless of FileCount
+
+# real monitor + width_only: test obtains ratio independently via P/Invoke to compute expected height

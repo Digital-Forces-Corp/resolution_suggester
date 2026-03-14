@@ -3,7 +3,7 @@ static class TestCase
     public record PictRow(
         string Monitor,
         string ResolutionArg,
-        string ScenarioSel,
+        string MonitorResSel,
         string Side,
         string FileCount,
         string FileSel,
@@ -92,21 +92,21 @@ static class TestCase
         if (row.ResolutionArg == "picker")
             parts.Add("3"); // entry 3 = 1280x720
 
-        // Scenario selection (prompt order: scenario, file, side)
-        switch (row.ScenarioSel)
+        // Monitor resolution selection (prompt order: monitor resolution, file, side)
+        switch (row.MonitorResSel)
         {
             case "one_window": parts.Add("1"); break;
             case "two_window":
-                // Two-window scenarios are numbered after one-window scenarios.
+                // Two-window options are numbered after one-window options.
                 // The exact number depends on how many modes pass filtering.
                 // Use a placeholder that TestRunner resolves after parsing stdout.
                 parts.Add("TWO_WINDOW_FIRST");
                 break;
-            case "invalid_scenario": parts.Add("999"); break;
+            case "invalid_selection": parts.Add("999"); break;
         }
 
-        // Invalid scenario exits early — no more prompts
-        if (row.ScenarioSel == "invalid_scenario")
+        // Invalid selection exits early — no more prompts
+        if (row.MonitorResSel == "invalid_selection")
             return string.Join("\n", parts) + "\n";
 
         // File selection (only prompted when 2+ files)
