@@ -37,16 +37,16 @@ static class TestCase
             args.Add($"--test-modes {mon.TestModesArg}");
         }
 
-        // Resolution arg
+        // Resolution arg (picker goes after file paths so parser sees it as last arg with no value)
         switch (row.ResolutionArg)
         {
             case "explicit_WxH": args.Add("-r 1024x768"); break;
             case "width_only": args.Add("-r 1280"); break;
             case "WxN_D": args.Add("-r 1280x4:3"); break;
-            case "picker": args.Add("-r"); break;
             case "help": args.Add("-h"); break;
             case "invalid_format": args.Add("-r notaresolution"); break;
             case "invalid_ratio": args.Add("-r 1280x0:0"); break;
+            // "picker" added after file paths below
             // "default": no -r flag
         }
 
@@ -69,6 +69,10 @@ static class TestCase
             // "zero": no file args
         }
 
+        // Picker must come after file paths so arg parser sees -r as last arg (no next value)
+        if (row.ResolutionArg == "picker")
+            args.Add("-r");
+
         return string.Join(" ", args);
     }
 
@@ -77,7 +81,8 @@ static class TestCase
         // Early-exit cases: no stdin needed
         if (row.ResolutionArg == "help" || row.ResolutionArg == "invalid_format" || row.ResolutionArg == "invalid_ratio")
             return null;
-        if (row.FileCount == "zero")
+        // Zero files with no picker means non-interactive (no stdin needed)
+        if (row.FileCount == "zero" && row.ResolutionArg != "picker")
             return null;
 
         var parts = new List<string>();

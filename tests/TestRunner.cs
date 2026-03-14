@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 // Find the exe: build first, then locate in bin
 string projectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
 string repoRoot = Path.GetFullPath(Path.Combine(projectDir, ".."));
-string exePath = Path.Combine(repoRoot, "src", "bin", "Debug", "net8.0-windows", "resolution_suggester.exe");
+string exePath = Path.Combine(repoRoot, "src", "bin", "Debug", "net8.0-windows", "win-x64", "resolution_suggester.exe");
 string tsvPath = Path.Combine(projectDir, "pairwise-output.tsv");
 
 if (!File.Exists(exePath))

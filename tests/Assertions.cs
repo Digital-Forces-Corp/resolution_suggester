@@ -90,11 +90,18 @@ static class Assertions
             string expectedHeader = $"Current Monitor #0, {mon.Width}x{mon.Height}, Ratio: 16:9, Frequency: {mon.Frequency}Hz, DPI Scale {expectedDpi}%";
             results.Add(AssertContains(result.Stdout, expectedHeader, "synthetic header"));
 
-            // Noise modes must not appear
-            foreach (string noise in mon.NoiseModes)
+            // Noise modes must not appear in scenario output
+            // Skip when picker is active (picker menu lists common resolutions that match noise dimensions)
+            if (row.ResolutionArg != "picker")
             {
-                string noiseDimensions = noise.Split('@')[0]; // strip frequency qualifier
-                results.Add(AssertNotContains(result.Stdout, noiseDimensions, $"noise mode {noise}"));
+                foreach (string noise in mon.NoiseModes)
+                {
+                    string noiseDimensions = noise.Split('@')[0]; // strip frequency qualifier
+                    // Skip noise check if dimensions match monitor resolution (they naturally appear in header/scenarios)
+                    if (noiseDimensions == $"{mon.Width}x{mon.Height}")
+                        continue;
+                    results.Add(AssertNotContains(result.Stdout, noiseDimensions, $"noise mode {noise}"));
+                }
             }
         }
 
