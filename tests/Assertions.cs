@@ -16,7 +16,8 @@ static class Assertions
         TestCase.PictRow row,
         ProcessRunner.RunResult result,
         string tempDir,
-        MonitorOracle.MonitorData? realMonitor)
+        MonitorOracle.MonitorData? realMonitor,
+        string impl = "csharp")
     {
         var results = new List<AssertResult>();
 
@@ -24,7 +25,8 @@ static class Assertions
         if (row.ResolutionArg == "help")
         {
             results.Add(AssertExitCode(result, 0));
-            results.Add(AssertContains(result.Stdout, "Usage: resolution_suggester [-r WxH|W|WxN:D] [paths...]", "help text"));
+            // Help text differs between implementations
+            results.Add(AssertContains(result.Stdout, "[-r WxH|W|WxN:D] [paths...]", "help text"));
             return results;
         }
         if (row.ResolutionArg == "invalid_format")

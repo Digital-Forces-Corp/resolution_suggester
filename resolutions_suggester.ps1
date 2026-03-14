@@ -1,6 +1,6 @@
 param(
     [Parameter(ValueFromRemainingArguments)]
-    [string[]]$Remaining
+    [string[]]$Args0
 )
 
 $MaxZoom = 2
@@ -13,8 +13,8 @@ $testMonitor = $null
 $testModes = $null
 $argIndex = 0
 
-while ($argIndex -lt $Remaining.Count) {
-    $arg = $Remaining[$argIndex]
+while ($argIndex -lt $Args0.Count) {
+    $arg = $Args0[$argIndex]
     if ($arg -eq '--help' -or $arg -eq '-h') {
         Write-Host "Usage: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [paths...]"
         Write-Host ""
@@ -31,7 +31,7 @@ while ($argIndex -lt $Remaining.Count) {
         Write-Host "                     winposstr and resolution settings in the .rdp file"
         return
     }
-    elseif (($arg -eq '--resolution' -or $arg -eq '-r') -and ($argIndex + 1 -ge $Remaining.Count -or $Remaining[$argIndex + 1].StartsWith('-'))) {
+    elseif (($arg -eq '--resolution' -or $arg -eq '-r') -and ($argIndex + 1 -ge $Args0.Count -or $Args0[$argIndex + 1].StartsWith('-'))) {
         $commonResolutions = @(
             @{ W = 800;  H = 600;  Ratio = '4:3';   Name = 'SVGA' }
             @{ W = 1024; H = 768;  Ratio = '4:3';   Name = 'XGA' }
@@ -69,7 +69,7 @@ while ($argIndex -lt $Remaining.Count) {
     }
     elseif ($arg -eq '--resolution' -or $arg -eq '-r') {
         $argIndex++
-        $parts = $Remaining[$argIndex] -split 'x'
+        $parts = $Args0[$argIndex] -split 'x'
         if ($parts.Count -eq 1) {
             $widthVal = 0
             if ([int]::TryParse($parts[0], [ref]$widthVal)) {
@@ -116,13 +116,13 @@ while ($argIndex -lt $Remaining.Count) {
             return
         }
     }
-    elseif ($arg -eq '--test-monitor' -and $argIndex + 1 -lt $Remaining.Count) {
+    elseif ($arg -eq '--test-monitor' -and $argIndex + 1 -lt $Args0.Count) {
         $argIndex++
-        $testMonitor = $Remaining[$argIndex]
+        $testMonitor = $Args0[$argIndex]
     }
-    elseif ($arg -eq '--test-modes' -and $argIndex + 1 -lt $Remaining.Count) {
+    elseif ($arg -eq '--test-modes' -and $argIndex + 1 -lt $Args0.Count) {
         $argIndex++
-        $testModes = $Remaining[$argIndex]
+        $testModes = $Args0[$argIndex]
     }
     else {
         $pathArgs += $arg
@@ -133,7 +133,7 @@ while ($argIndex -lt $Remaining.Count) {
 # Resolve .rdp file paths
 $rdpPaths = @()
 foreach ($pathArg in $pathArgs) {
-    $resolved = (Resolve-Path $pathArg).Path
+    $resolved = [System.IO.Path]::GetFullPath($pathArg)
     if (Test-Path $resolved -PathType Container) {
         $rdpPaths += @(Get-ChildItem $resolved -Filter '*.rdp' | Select-Object -ExpandProperty FullName)
     } else {
@@ -600,6 +600,10 @@ if ($side -eq 'L') {
 }
 
 # Update the .rdp file, ensuring all documented settings are present
+if (-not (Test-Path $targetPath)) {
+    Write-Host "File not found: $targetPath"
+    exit 1
+}
 $lines = @(Get-Content $targetPath -Encoding Unicode)
 
 $requiredSettings = @(

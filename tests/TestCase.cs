@@ -25,11 +25,12 @@ static class TestCase
         return rows;
     }
 
-    public static string BuildCliArgs(PictRow row, string tempDir)
+    public static string BuildCliArgs(PictRow row, string tempDir, string impl = "csharp")
     {
         var args = new List<string>();
 
         // --test-monitor / --test-modes for synthetic monitors
+        // -File mode passes args literally, no quoting needed for either impl
         if (row.Monitor != "real")
         {
             var mon = SyntheticMonitor.All[row.Monitor];
