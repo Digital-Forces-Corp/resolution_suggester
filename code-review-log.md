@@ -1,97 +1,9 @@
-# Code Review Log — 2026-03-14
-
-Full codebase review: 37 review agents (3 per file × 12 files + 1 combined for .sln), followed by 12 fix agents.
-
-## Findings and Fixes Applied
-
-### Program.cs
-- `Marshal.SizeOf(instance)` → `Marshal.SizeOf<T>()` (obsolete API)
-- `PrintResolutionOptions`: `monitorResolutions.Add`/`optionNumber++` now guarded behind null check; callers pass null when non-interactive
-- `ModeMatchesFilter`: `RatioTolerance` passed as explicit parameter instead of captured from file scope
-- WxN:D branch: `rdpWidth <= 0` validated before computing `rdpHeight`
-
-### resolutions_suggester.ps1
-- Embedded C# monitor detection: replaced `GetConsoleWindow`+`MonitorFromWindow` with `MonitorFromPoint(0,1)` + `MONITOR_DEFAULTTONEAREST` (matching Program.cs)
-- Added `[StructLayout(LayoutKind.Sequential)]` on embedded DEVMODE and RECT structs
-- `SetProcessDpiAwareness` HRESULT now checked; tolerates 0 and E_ACCESSDENIED, errors on other values
-- Added `MaxRdpDimension = 8192` validation in all three `-r` format branches
-- Catch block: `$_` → `$($_.Exception.Message)`, `$targetPath` → `${targetPath}` before colon
-
-### MonitorOracle.cs
-- `MonitorFromPoint(0,0)` with `MONITOR_DEFAULTTOPRIMARY` → `(0,1)` with `MONITOR_DEFAULTTONEAREST` (matching Program.cs)
-- Added `CharSet = CharSet.Auto` to DEVMODE `[StructLayout]` and `EnumDisplaySettings` DllImport
-- `dpiY` now captured and asserted equal to `dpiX`
-
-### ProcessRunner.cs
-- `Task.WaitAll` return value now checked; throws `InvalidOperationException` on drain timeout instead of silently returning empty strings
-- Removed redundant no-arg `WaitForExit()` on normal path
-
-### Assertions.cs
-- `ComputeExpectedWinposstr`: added `Math.Max(0, x1 - winW)` clamp (matching Program.cs)
-- Removed duplicate fixture constants (`FixtureAllPresent`, `FixtureNonePresent`, `FixturePartial`); now references `FixtureManager.*`
-- Removed duplicate `FixturesDir`; now references `FixtureManager.FixturesDir` (changed to `internal`)
-- Error-string returns in `ComputeExpectedWinposstr` → `throw new InvalidOperationException`
-- `AssertContains`/`AssertNotContains` failure messages now include actual text (truncated to 200 chars)
-- `AssertExitCode` failure message now includes stdout alongside stderr
-
-### TestRunner.cs
-- Dry-run `dryStdin` now provides complete stdin for two_window cases (picker selection + monitor res "1" + side "L")
-- Removed dead `tsvPath` parameter from `RunTestSuite`
-- `tempDir`: empty-string sentinel → `string? tempDir = null` with null check
-- `CountOptionLines`: now uses regex `^\*?\d+x\d+,` to match option lines instead of counting all non-blank lines
-
-### TestCase.cs
-- Removed dead `impl` parameter from `BuildCliArgs` and both call sites
-- `BuildStdin` null return for zero-file non-picker: confirmed correct (program exits before stdin when zero files)
-
-### SyntheticMonitor.cs
-- Removed dead noise entries (`2560x1440@75Hz`, `1920x1080@144Hz`) that were silently skipped by Assertions.cs guard
-
-### release.yml
-- Removed `--no-build` from Publish step (incompatible with trimmed single-file publish)
-- Added `shell: bash` to Verify step (was using `test -f` without specifying bash on Windows runner)
-- Split `vedantmgoyal9/winget-releaser` into separate `winget` job with `permissions: contents: read`
-
-### resolution_suggester.sln
-- Project type GUID: classic `{FAE04EC0...}` → SDK-style `{9A19103F...}`
-
-### pairwise.pict
-- Removed redundant constraint (line 24, subsumed by line 27)
-- Added `RdpSettings` documentation comment
-- Improved zero-file constraint comment
-
-### ResolutionSuggesterTests.csproj
-- `<ProjectReference>` attempted but reverted: NETSDK1151 prohibits non-self-contained project from referencing self-contained exe
-
-## Lessons Learned
-
-### ProjectReference to self-contained exe is not possible
-.NET SDK error NETSDK1151 prevents a non-self-contained project from referencing a self-contained executable via `<ProjectReference>`. The test project's implicit dependency (locating the exe by convention path) is the correct design. Documented in README.md.
-
-### picker + zero files is still non-interactive for MonitorResSel/Side
-Picker only makes the RDP resolution selection interactive (the first prompt). The monitor resolution selection and side prompts only appear when file paths are provided. The original PICT constraint locking MonitorResSel/Side for all zero-file cases (including picker) was correct. Unlocking them produced test failures: program exits 0 (non-interactive success) but test expected exit code 1 (from invalid_side/invalid_selection that never runs).
-
-## Fixes That Were Wrong
-
-### pairwise.pict: unlocking picker+zero for MonitorResSel/Side
-The review agent suggested that `picker + FileCount=zero` should allow MonitorResSel and Side to vary (since picker is interactive). This was wrong. Picker only makes the RDP resolution selection interactive. The MonitorResSel/Side prompts only appear when file paths are provided. Unlocking the constraint produced two test failures: program exits 0 (non-interactive success) but tests expected exit code 1 (from invalid_side/invalid_selection prompts that never run). Reverted to the original constraint with an improved comment.
-
-### ResolutionSuggesterTests.csproj: adding ProjectReference
-The review agent flagged the missing `<ProjectReference>` as an implicit dependency. Adding it caused NETSDK1151: a non-self-contained project cannot reference a self-contained executable. The test project's convention-based exe lookup is the correct design for this architecture. Reverted; documented in README.md instead.
-
-## Not Fixed (by design)
-
-### DEVMODE struct layout (Program.cs, MonitorOracle.cs)
-- Fields use `int` instead of `uint` (DWORD) — coincidentally correct on x64, changing risks breaking working code
-- Sequential layout instead of Explicit for the union region — same rationale
-- Both patterns are established across the codebase and tests pass on the target platform
-
-## Standards (to prevent flip-flops and invented issues)
+## Standards (to prevent flip-flops)
 
 1. Monitor detection: `GetConsoleWindow()` + `MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST)`. No `MonitorFromPoint`.
 2. ProcessRunner: `process.WaitForExit()` (no-arg) after `Kill()`.
 3. Test error handling: `throw`, not error-string returns.
-4. `areaOne`: cap width at 100% with `Math.Min(widthUsage, 100)`, matching two-window calculation.
+4. Area percentage: `Math.Round` for computation, capped at 100% with `Math.Min(widthUsage, 100)`. Applies to both C# and PS1.
 5. Review parity: Program.cs and resolutions_suggester.ps1 must be reviewed together. All findings in one pass.
 6. PICT FileCount column: split into InputType (none, file, directory, nonexistent) and InputCount (1, 2). Constraint: `IF [InputType] <> "file" THEN [InputCount] = 1`. No string-encoded numbers.
 7. One-per-line struct fields: keep. Easier to diff and review.
@@ -104,3 +16,54 @@ The review agent flagged the missing `<ProjectReference>` as an implicit depende
 14. PS1 `-r` lookahead: first `-or` clause guards bounds. No redundant bounds checks on subsequent clauses.
 15. ProcessRunner normal path: `Task.WaitAll` with timeout after `WaitForExit`. Throw if streams don't drain.
 16. PS1 embedded C# `GetMonitorData`: pass constants as parameters, no hardcoded duplicates.
+17. release.yml: separate "Build" and "Test" YAML steps. Each step gets its own pass/fail in the GitHub Actions UI.
+18. DEVMODE fields: `uint` to match Windows SDK `DWORD` typedef. Explicit `(int)` casts at usage sites. Applies to Program.cs, MonitorOracle.cs, and PS1 embedded C#.
+19. CountOptionLines: regex `^\*?\d+x\d+,` for line counting, `Split(new[] { "\r\n", "\n" }, ...)` for line splitting, `Trim()` (not `TrimStart()`) for section-end detection.
+20. Solution file: SDK-style project type GUID `{9A19103F-16F7-4668-BE54-9A1E7A4F7556}` for all projects.
+21. Assertion failure messages: verbose. Include stdout, stderr, and excerpts. CI failures must be diagnosable without re-running locally.
+22. SyntheticMonitor `TestMonitorArg`: computed property derived from Width/Height/Frequency/Dpi fields. No literal string duplication.
+23. ProcessRunner: both stdout and stderr read async via `Task.Run`. Synchronous reads deadlock.
+24. ProcessRunner timeout message: include stdout and stderr. Consistent with standard #21.
+
+## Last version (progressive improvements)
+
+25. README SetProcessDpiAwareness description: "with PROCESS_PER_MONITOR_DPI_AWARE to enable per-monitor DPI awareness".
+26. README `-r` flag description: three formats WxH, W, WxN:D.
+27. README aspect ratio tolerance wording: "same aspect ratio (ratio difference < 0.001)".
+28. README zoom cap wording: "capped at the maximum zoom level, currently 2".
+29. README build output path: "Produces publish\resolution_suggester.exe (pass -o publish as shown above).".
+30. README winget PR timing: specific PR references and measured durations.
+31. csproj DebugType: conditional on Release `<DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>`.
+32. TestCase.cs BuildCliArgs: no `impl` parameter.
+33. pairwise.pict comment ordering: merged comment blocks for file selection and nonexistent file.
+
+## To be discussed with user
+
+- [Program.cs:243, resolutions_suggester.ps1:446, README.md:103] CONTRADICTION with standard #1: code and README use `MonitorFromPoint(POINT{0,1}, MONITOR_DEFAULTTONEAREST)` but standard #1 says "No `MonitorFromPoint`." Standard #1 text is stale. (agents: security 95, bugs 95, logic 95, docs 95; evidence: no reference to `GetConsoleWindow` or `MonitorFromWindow` exists anywhere in the codebase)
+
+- [resolutions_suggester.ps1:432,434,449] CONTRADICTION with standard #8: PS1 embedded C# uses `Marshal.SizeOf(devMode)`, `Marshal.SizeOf(currentSettings)`, `Marshal.SizeOf(monitorInfo)` — the instance form. Standard #8 requires `Marshal.SizeOf<T>()`. Program.cs correctly uses the generic form. (agents: security 90, bugs 80, logic 80, quality 95; evidence: three call sites in PS1 embedded C# use the instance overload)
+
+- [resolutions_suggester.ps1:425] CONTRADICTION with standard #16: PS1 embedded C# hardcodes `const double RatioTolerance = 0.001` instead of receiving it as a parameter to `GetMonitorData`. PS1 top-level also defines `$RatioTolerance = 0.001` on line 9, creating a duplicated magic value. (agents: quality 95; evidence: standard #16 says "pass constants as parameters, no hardcoded duplicates")
+
+- [Program.cs:324] Missing `zoomFactor < 1` guard in compute loop. PS1 line 270 has `if ($zoom -lt 1) { continue }` but Program.cs has no equivalent, allowing zero-zoom entries with meaningless window dimensions. (agents: bugs 90, logic 90, quality 80, docs 80; evidence: PS1 line 270 guards explicitly, C# does not)
+
+- [resolutions_suggester.ps1:606-625] CONTRADICTION with standard #10: PS1 1-window and 2-window display loops are near-identical copy-paste. Program.cs extracted this into `PrintResolutionOptions`. (agents: quality 85; evidence: lines 606-612 and 617-625 differ only in area/width fields and overlap note)
+
+- [resolutions_suggester.ps1:252] Dead code: `if ($currentRatio -eq 0)` guard is unreachable because `$currentRatio` is computed as `$currentWidth / $currentHeight` on line 227 — if `$currentHeight` were zero, division would already have thrown before reaching line 252. (agents: quality 80, logic 50; evidence: line 227 divides unconditionally by `$currentHeight`)
+
+- [Program.cs:117] Dead validation: `rdpWidth <= 0` check inside WxN:D branch is unreachable because the same condition already exits at line 102-106. (agents: quality 80; evidence: line 102 `if (rdpWidth <= 0)` exits, so line 117 left operand is always false)
+
+- [README.md:74] Header line field order is wrong: describes "aspect ratio, DPI scale, refresh rate" but actual output (Program.cs:349, PS1:587) emits "Ratio, Frequency, DPI Scale" — frequency before DPI scale. (agents: bugs 95, quality 90, logic 95; evidence: example output on line 59 shows `Ratio: 16:9, Frequency: 60Hz, DPI Scale 100%`)
+
+- [README.md:140,143] Build command `dotnet publish src/resolution_suggester.csproj -c Release` does not include `-o publish`, but line 143 says "pass `-o publish` as shown above." Without `-o publish`, actual output path is `src/bin/Release/net8.0-windows/win-x64/publish/`. Last-version entry #29 records this exact text. (agents: docs 92, bugs 95, quality 95, logic 95; evidence: release.yml line 30 has `-o publish` but README line 140 does not)
+
+- [README.md:93] `smart sizing:i:0` description says "scales the remote desktop to fit the window" but `:i:0` disables smart sizing. Description matches enabled behavior, not the value shown. (agents: docs 85, bugs 80, logic 80, quality 80; evidence: `smart sizing:i:0` = disabled, `i:1` = enabled)
+
+- [README.md:9] States "Detects the monitor where the console is running" but `MonitorFromPoint(0,1)` finds the monitor nearest to screen coordinate (0,1), not the console's monitor. On multi-monitor setups with the console on a secondary monitor, the result differs. (agents: docs 80, logic 80; evidence: Program.cs:243 and PS1:446 pass fixed coordinates, not a window handle)
+
+- [release.yml:32-40] Tag format validation runs after Build, Test, and Publish. An invalid tag like `vfoo` triggers the workflow, burns through all three steps, then fails at validation. (agents: logic 80; evidence: steps execute sequentially; Build line 24, Test line 27, Publish line 30 all precede validation at line 36)
+
+- [release.yml:36] Tag regex `^v[0-9]+\.[0-9]+\.[0-9]+` has no end anchor. Tags like `v1.2.3-rc1` or `v1.2.3garbage` pass validation. The extracted version string propagates to winget-releaser. (agents: logic 80; evidence: no `$` anchor; error message says "expected format v\*.\*.\*" suggesting strict matching was intended)
+
+---
+Sweep run: 2026-03-15. Threshold: 80. Skipped file types: (none — all tracked files are text)
