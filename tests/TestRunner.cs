@@ -1,22 +1,11 @@
 using System.Text.RegularExpressions;
 
-const string ImplCSharp = "csharp";
-const string ImplPs1 = "ps1";
 const string OneRdpSectionMarker = "1 RDP";
 
-// Find the exe and PS1: build first, then locate in bin
 string projectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
 string repoRoot = Path.GetFullPath(Path.Combine(projectDir, ".."));
-string exePath = Path.Combine(repoRoot, "src", "bin", "Release", "net8.0-windows", "win-x64", "resolution_suggester.exe");
 string ps1Path = Path.Combine(repoRoot, "resolutions_suggester.ps1");
 string tsvPath = Path.Combine(projectDir, "pairwise-output.tsv");
-
-if (!File.Exists(exePath))
-{
-    Console.WriteLine($"ERROR: exe not found at {exePath}");
-    Console.WriteLine("Run: dotnet build src/resolution_suggester.csproj");
-    return 1;
-}
 
 if (!File.Exists(ps1Path))
 {
@@ -48,23 +37,15 @@ Console.WriteLine($"Loaded {rows.Count} test cases from {tsvPath}");
 
 int totalFailed = 0;
 
-// Run tests against C# exe
-Console.WriteLine();
-Console.WriteLine("=== C# implementation ===");
-totalFailed += RunTestSuite(ImplCSharp, rows, realMonitor, exePath, ps1Path);
-
-// Run tests against PS1 script
 Console.WriteLine();
 Console.WriteLine("=== PowerShell implementation ===");
-totalFailed += RunTestSuite(ImplPs1, rows, realMonitor, exePath, ps1Path);
+totalFailed += RunTestSuite(rows, realMonitor, ps1Path);
 
 return totalFailed > 0 ? 1 : 0;
 
 static int RunTestSuite(
-    string impl,
     List<TestCase.PictRow> rows,
     MonitorOracle.MonitorData? realMonitor,
-    string exePath,
     string ps1Path)
 {
     int passed = 0;
@@ -101,7 +82,7 @@ static int RunTestSuite(
             {
                 string dryArgs = TestCase.BuildCliArgs(row with { FileCount = "zero" }, tempDir);
                 string? dryStdin = row.ResolutionArg == "picker" ? TestCase.PickerSelection + "\n1\nL\n" : "1\nL\n";
-                var dryResult = RunImpl(impl, exePath, ps1Path, dryArgs, dryStdin);
+                var dryResult = RunPs1(ps1Path, dryArgs, dryStdin);
                 if (dryResult.ExitCode != 0)
                     throw new InvalidOperationException($"Dry-run exited with code {dryResult.ExitCode}: {dryResult.Stderr}");
                 int oneWindowCount = CountOptionLines(dryResult.Stdout, OneRdpSectionMarker);
@@ -111,7 +92,7 @@ static int RunTestSuite(
             }
 
             // Run
-            var result = RunImpl(impl, exePath, ps1Path, cliArgs, stdin);
+            var result = RunPs1(ps1Path, cliArgs, stdin);
 
             // Assert
             var assertResults = Assertions.AssertAll(row, result, tempDir, realMonitor);
@@ -163,15 +144,11 @@ static int RunTestSuite(
     return failed;
 }
 
-static ProcessRunner.RunResult RunImpl(string impl, string exePath, string ps1Path, string args, string? stdin)
+static ProcessRunner.RunResult RunPs1(string ps1Path, string args, string? stdin)
 {
-    if (impl == ImplPs1)
-    {
-        // PowerShell -File mode: args are treated literally (no @ splatting issues),
-        // Write-Host output goes to stdout when captured via ProcessStartInfo
-        return ProcessRunner.Run("powershell.exe", $"-NoProfile -File \"{ps1Path}\" {args}", stdin);
-    }
-    return ProcessRunner.Run(exePath, args, stdin);
+    // PowerShell -File mode: args are treated literally (no @ splatting issues),
+    // Write-Host output goes to stdout when captured via ProcessStartInfo
+    return ProcessRunner.Run("powershell.exe", $"-NoProfile -File \"{ps1Path}\" {args}", stdin);
 }
 
 static string FormatTestLabel(TestCase.PictRow row) =>

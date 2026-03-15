@@ -140,7 +140,7 @@ static class Assertions
                 int refWinW = (int)Math.Ceiling(rdpW * zoom + chromeWRef);
                 int refWinH = (int)Math.Ceiling(rdpH * zoom + chromeHRef);
                 int refX1 = mon.Width - 1;
-                int refX0 = refX1 - refWinW;
+                int refX0 = Math.Max(0, refX1 - refWinW);
                 string expectedLine = $"RDP {rdpW}x{rdpH} {zoom * 100}% rdp zoom: winposstr:s:0,1,0,0,{refWinW},{refWinH}  2nd: winposstr:s:0,1,{refX0},0,{refX1},{refWinH}";
                 results.Add(AssertContains(result.Stdout, expectedLine, $"winposstr reference zoom {zoom * 100}%"));
             }

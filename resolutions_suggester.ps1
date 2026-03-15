@@ -10,6 +10,59 @@ $RatioTolerance = 0.001
 $MaxRdpDimension = 8192
 $InvalidResolutionFormatMsg = "Invalid RDP resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
 
+function Read-MenuChoice([string]$Prompt, [int]$Min, [int]$Max) {
+    Write-Host "$Prompt" -NoNewline
+    $menuInput = [Console]::In.ReadLine()
+    if ($null -eq $menuInput) {
+        Write-Host "ERROR: No input received."
+        exit 1
+    }
+    $parsed = 0
+    if (-not [int]::TryParse($menuInput, [ref]$parsed) -or $parsed -lt $Min -or $parsed -gt $Max) {
+        Write-Host "Invalid selection."
+        exit 1
+    }
+    return $parsed
+}
+
+function Get-Gcd([int]$a, [int]$b) { while ($b -ne 0) { $t = $b; $b = $a % $b; $a = $t } return $a }
+
+function Write-ResolutionOptions([array]$Sorted, [int]$WindowCount, [string]$RdpLabel, [bool]$Interactive, [ref]$OptionNumber, [ref]$MonitorResolutions) {
+    Write-Host "`n--- Available monitor resolutions for $WindowCount $RdpLabel with same ratio and frequency sorted by area used ---"
+    foreach ($res in $Sorted) {
+        $marker = if ($res.IsCurrent) { "*" } else { "" }
+        $prefix = if ($Interactive) { "  $($OptionNumber.Value). " } else { "" }
+        $areaPercent = if ($WindowCount -eq 1) { $res.AreaOnePercent } else { $res.AreaTwoPercent }
+        $widthPercent = if ($WindowCount -eq 1) { $res.WidthUsage } else { [Math]::Min($res.WidthUsageTwo, 100) }
+        $overlapNote = if ($WindowCount -eq 2 -and $res.WidthUsageTwo -gt 100) { ", $($res.WidthUsageTwo - 100)% overlap" } else { "" }
+        Write-Host "$prefix$marker$($res.Width)x$($res.Height), $areaPercent% area ($widthPercent% width, $($res.HeightUsage)% height$overlapNote), $($res.ZoomFactor * 100)% rdp zoom"
+        $MonitorResolutions.Value += $res
+        $OptionNumber.Value++
+    }
+}
+
+function Get-FilteredModes([array]$Modes, [int]$TargetFrequency, [int]$MinimumHeight, [double]$TargetRatio, [double]$RatioToleranceParam) {
+    $seen = @{}
+    $filtered = @()
+    foreach ($modeEntry in $Modes) {
+        $modeW = $modeEntry.Width
+        $modeH = $modeEntry.Height
+        $modeFreq = $modeEntry.Frequency
+
+        if ($modeFreq -eq $TargetFrequency -and $modeH -ge $MinimumHeight -and $modeH -gt 0) {
+            $ratio = [double]$modeW / $modeH
+            if ([Math]::Abs($ratio - $TargetRatio) -lt $RatioToleranceParam) {
+                $key = "${modeW}x${modeH}"
+                if (-not $seen.ContainsKey($key)) {
+                    $seen[$key] = $true
+                    $filtered += @{ Width = $modeW; Height = $modeH }
+                }
+            }
+        }
+    }
+    return ,$filtered
+}
+
 # Parse arguments: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [--help] [paths...]
 $rdpWidth = 800
 $rdpHeight = 600
@@ -159,59 +212,6 @@ foreach ($pathArg in $pathArgs) {
     }
 }
 
-function Read-MenuChoice([string]$Prompt, [int]$Min, [int]$Max) {
-    Write-Host "$Prompt" -NoNewline
-    $menuInput = [Console]::In.ReadLine()
-    if ($null -eq $menuInput) {
-        Write-Host "ERROR: No input received."
-        exit 1
-    }
-    $parsed = 0
-    if (-not [int]::TryParse($menuInput, [ref]$parsed) -or $parsed -lt $Min -or $parsed -gt $Max) {
-        Write-Host "Invalid selection."
-        exit 1
-    }
-    return $parsed
-}
-
-function Get-Gcd([int]$a, [int]$b) { while ($b -ne 0) { $t = $b; $b = $a % $b; $a = $t } return $a }
-
-function Write-ResolutionOptions([array]$Sorted, [int]$WindowCount, [string]$RdpLabel, [bool]$Interactive, [ref]$OptionNumber, [ref]$MonitorResolutions) {
-    Write-Host "`n--- Available monitor resolutions for $WindowCount $RdpLabel with same ratio and frequency sorted by area used ---"
-    foreach ($res in $Sorted) {
-        $marker = if ($res.IsCurrent) { "*" } else { "" }
-        $prefix = if ($Interactive) { "  $($OptionNumber.Value). " } else { "" }
-        $areaPercent = if ($WindowCount -eq 1) { $res.AreaOnePercent } else { $res.AreaTwoPercent }
-        $widthPercent = if ($WindowCount -eq 1) { $res.WidthUsage } else { [Math]::Min($res.WidthUsageTwo, 100) }
-        $overlapNote = if ($WindowCount -eq 2 -and $res.WidthUsageTwo -gt 100) { ", $($res.WidthUsageTwo - 100)% overlap" } else { "" }
-        Write-Host "$prefix$marker$($res.Width)x$($res.Height), $areaPercent% area ($widthPercent% width, $($res.HeightUsage)% height$overlapNote), $($res.ZoomFactor * 100)% rdp zoom"
-        $MonitorResolutions.Value += $res
-        $OptionNumber.Value++
-    }
-}
-
-function Get-FilteredModes([array]$Modes, [int]$TargetFrequency, [int]$MinimumHeight, [double]$TargetRatio, [double]$RatioToleranceParam) {
-    $seen = @{}
-    $filtered = @()
-    foreach ($modeEntry in $Modes) {
-        $modeW = $modeEntry.Width
-        $modeH = $modeEntry.Height
-        $modeFreq = $modeEntry.Frequency
-
-        if ($modeFreq -eq $TargetFrequency -and $modeH -ge $MinimumHeight -and $modeH -gt 0) {
-            $ratio = [double]$modeW / $modeH
-            if ([Math]::Abs($ratio - $TargetRatio) -lt $RatioToleranceParam) {
-                $key = "${modeW}x${modeH}"
-                if (-not $seen.ContainsKey($key)) {
-                    $seen[$key] = $true
-                    $filtered += @{ Width = $modeW; Height = $modeH }
-                }
-            }
-        }
-    }
-    return ,$filtered
-}
-
 if ($testMonitor) {
     # Parse --test-monitor: WxH@FHz@Ddpi (e.g. 2560x1440@60Hz@96dpi)
     if ($testMonitor -notmatch '^(\d+)x(\d+)@(\d+)Hz@(\d+)dpi$') {
@@ -320,7 +320,7 @@ using System.Collections.Generic;
 using System.Linq;
 public class MonitorResolutions
 {
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     public struct DEVMODE
     {
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
