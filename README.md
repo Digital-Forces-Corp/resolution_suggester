@@ -1,6 +1,6 @@
 # Resolution Suggester
 
-Analyzes available monitor resolutions on the current monitor and recommends settings for running 1 or 2 RDP windows at a given base resolution (default 800x600) with zoom levels up to whatever the monitor can fit.
+Analyzes available monitor resolutions on the current monitor and recommends settings for running 1 or 2 RDP windows at a given base resolution (default 800x600) with zoom levels up to 2x.
 
 An RDP session at a given RDP resolution does not fit in exactly that many pixels on screen. The window's title bar and borders add pixels in both dimensions, so the actual footprint is larger (e.g., 800x600 becomes 814x637 at 100% DPI). These decorations scale proportionally with the monitor's DPI setting — at 200% DPI the borders are twice as large in pixels — so the program factors in the current DPI when calculating window sizes.
 
@@ -15,7 +15,7 @@ An RDP session at a given RDP resolution does not fit in exactly that many pixel
 
 ## Install
 
-PowerShell script (~12KB, no dependencies):
+PowerShell script (~29KB, no dependencies):
 
 ```powershell
 curl.exe -Lo c:\dfc\scripts\resolutions_suggester.ps1 https://raw.githubusercontent.com/Digital-Forces-Corp/resolution_suggester/main/resolutions_suggester.ps1
@@ -62,7 +62,7 @@ RDP 800x600 200% rdp zoom: winposstr:s:0,1,0,0,1614,1237  2nd: winposstr:s:0,1,9
 
 --- Available monitor resolutions for 1 RDP 800x600 with same ratio and frequency sorted by area used ---
 *2560x1440, 54% area (63% width, 86% height), 200% rdp zoom
- 1920x1080, 24% area (42% width, 59% height), 100% rdp zoom
+ 1920x1080, 25% area (42% width, 59% height), 100% rdp zoom
 
 --- Available monitor resolutions for 2 RDP 800x600 with same ratio and frequency sorted by area used ---
 *2560x1440, 86% area (100% width, 86% height, 26% overlap), 200% rdp zoom
@@ -71,7 +71,7 @@ RDP 800x600 200% rdp zoom: winposstr:s:0,1,0,0,1614,1237  2nd: winposstr:s:0,1,9
 
 ### Reading the Output
 
-- Header line: monitor number, current monitor resolution, aspect ratio, DPI scale, refresh rate
+- Header line: monitor number, current monitor resolution, aspect ratio, refresh rate, DPI scale
 - `winposstr` lines: ready-to-use values for positioning the 1st and 2nd RDP windows at each zoom level
 - Ranked lists: available monitor resolutions sorted by how efficiently they fill the screen for 1 or 2 RDP windows; numbered in interactive mode
 - `*` marks the current monitor resolution
@@ -90,7 +90,7 @@ desktopheight:i:600
 winposstr:s:0,1,0,0,814,637
 ```
 
-- `smart sizing` \- scales the remote desktop to fit the window without changing the remote resolution
+- `smart sizing` \- disabled — the remote desktop renders at native resolution without scaling
 - `allow font smoothing` \- enables ClearType rendering in the session
 - `desktopwidth` / `desktopheight` \- the remote session resolution (must match the `-r` value passed to the program)
 - `winposstr` \- window position on the local monitor; format: `flags,showCmd,left,top,right,bottom`
@@ -100,7 +100,7 @@ winposstr:s:0,1,0,0,814,637
 The program:
 
 1. Calls `SetProcessDpiAwareness` with `PROCESS_PER_MONITOR_DPI_AWARE` to enable per-monitor DPI awareness
-2. Identifies the current monitor using `MonitorFromPoint` with point (0,1) and `MONITOR_DEFAULTTONEAREST`
+2. Identifies the current monitor using `GetConsoleWindow` and `MonitorFromWindow` with `MONITOR_DEFAULTTONEAREST`
 3. Reads current display settings and DPI via `EnumDisplaySettings` and `GetDpiForMonitor`
 4. Enumerates all display modes for that monitor, filtering to same aspect ratio (ratio difference < 0.001), same refresh rate, and minimum height to fit at least one RDP session plus window borders and title bar
 5. Computes the maximum integer zoom factor each monitor resolution supports (largest N where N \* base height + decoration height <= monitor resolution height, capped at the maximum zoom level, currently 2)
@@ -110,9 +110,12 @@ The program:
 
 Pushing a `v*` tag triggers the [release workflow](.github/workflows/release.yml), which:
 
-1. Builds the self-contained executable on `windows-latest`
-2. Creates a GitHub Release with auto-generated release notes and the `.exe` attached
-3. Submits the new version to winget via `winget-releaser` (requires `WINGET_TOKEN` GitHub repository secret)
+1. Validates the tag format (`v*.*.*`)
+2. Builds the project on `windows-latest`
+3. Runs the test suite
+4. Publishes the self-contained executable and verifies it exists
+5. Creates a GitHub Release with auto-generated release notes and the `.exe` attached
+6. Submits the new version to winget via `winget-releaser` (requires `WINGET_TOKEN` GitHub repository secret)
 
 The package uses `InstallerType: portable` (bare `.exe`, no installer). Reference packages with the same pattern:
 
@@ -137,7 +140,7 @@ git push origin v1.2.0
 Requires .NET 8 SDK. The PowerShell script needs no build step.
 
 ```
-dotnet publish src/resolution_suggester.csproj -c Release
+dotnet publish src/resolution_suggester.csproj -c Release -o publish
 ```
 
 Produces `publish\resolution_suggester.exe` (pass `-o publish` as shown above).

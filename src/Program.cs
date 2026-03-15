@@ -84,26 +84,11 @@ for (int argIndex = 0; argIndex < args.Length; argIndex++)
         string[] parts = args[argIndex].Split('x');
         if (parts.Length == 1 && int.TryParse(parts[0], out rdpWidth))
         {
-            if (rdpWidth <= 0)
-            {
-                Console.WriteLine("RDP width must be a positive integer.");
-                return 1;
-            }
-            if (rdpWidth > MaxRdpDimension)
-            {
-                Console.WriteLine($"RDP width exceeds maximum of {MaxRdpDimension}.");
-                return 1;
-            }
             rdpHeight = 0; // derive from monitor aspect ratio after detection
         }
         else if (parts.Length == 2 && int.TryParse(parts[0], out rdpWidth) && parts[1].Contains(':'))
         {
             // WxN:D format: width with explicit aspect ratio (e.g. 1280x4:3)
-            if (rdpWidth <= 0)
-            {
-                Console.WriteLine("RDP width must be a positive integer.");
-                return 1;
-            }
             string[] ratioParts = parts[1].Split(':');
             if (ratioParts.Length == 2 && int.TryParse(ratioParts[0], out int ratioW) && int.TryParse(ratioParts[1], out int ratioH) && ratioW > 0 && ratioH > 0)
             {
@@ -114,30 +99,25 @@ for (int argIndex = 0; argIndex < args.Length; argIndex++)
                 Console.WriteLine("Invalid aspect ratio. Use N:D (e.g. 16:9, 4:3).");
                 return 1;
             }
-            if (rdpWidth <= 0 || rdpHeight <= 0)
-            {
-                Console.WriteLine("RDP width and height must be positive integers.");
-                return 1;
-            }
-            if (rdpWidth > MaxRdpDimension || rdpHeight > MaxRdpDimension)
-            {
-                Console.WriteLine($"RDP dimensions exceed maximum of {MaxRdpDimension}x{MaxRdpDimension}.");
-                return 1;
-            }
         }
         else if (parts.Length != 2 || !int.TryParse(parts[0], out rdpWidth) || !int.TryParse(parts[1], out rdpHeight))
         {
             Console.WriteLine("Invalid RDP resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3).");
             return 1;
         }
-        else if (rdpWidth <= 0 || rdpHeight <= 0)
+        bool widthOnly = rdpHeight == 0 && parts.Length == 1;
+        if (rdpWidth <= 0 || (!widthOnly && rdpHeight <= 0))
         {
-            Console.WriteLine("RDP width and height must be positive integers.");
+            Console.WriteLine(widthOnly
+                ? "RDP width must be a positive integer."
+                : "RDP width and height must be positive integers.");
             return 1;
         }
-        else if (rdpWidth > MaxRdpDimension || rdpHeight > MaxRdpDimension)
+        if (rdpWidth > MaxRdpDimension || (!widthOnly && rdpHeight > MaxRdpDimension))
         {
-            Console.WriteLine($"RDP dimensions exceed maximum of {MaxRdpDimension}x{MaxRdpDimension}.");
+            Console.WriteLine(widthOnly
+                ? $"RDP width exceeds maximum of {MaxRdpDimension}."
+                : $"RDP dimensions exceed maximum of {MaxRdpDimension}x{MaxRdpDimension}.");
             return 1;
         }
     }
@@ -178,6 +158,7 @@ int currentWidth, currentHeight, currentFrequency;
 double dpiScale, chromeWidth, chromeHeight;
 double currentRatio;
 int minimumHeight;
+uint dpiX;
 var seen = new HashSet<string>();
 var modes = new List<(int Width, int Height)>();
 
@@ -193,16 +174,13 @@ if (testMonitor != null)
     currentWidth = int.Parse(tmMatch.Groups[1].Value);
     currentHeight = int.Parse(tmMatch.Groups[2].Value);
     currentFrequency = int.Parse(tmMatch.Groups[3].Value);
-    uint dpiX = uint.Parse(tmMatch.Groups[4].Value);
+    dpiX = uint.Parse(tmMatch.Groups[4].Value);
     if (dpiX == 0)
     {
         Console.WriteLine("DPI must be a positive integer.");
         return 1;
     }
-    dpiScale = dpiX / 96.0;
-    chromeWidth = ChromeWidth96Dpi * dpiScale;
-    chromeHeight = ChromeHeight96Dpi * dpiScale;
-    minimumHeight = (int)Math.Ceiling(rdpHeight + chromeHeight);
+    (dpiScale, chromeWidth, chromeHeight, minimumHeight) = ComputeDisplayMetrics(dpiX, rdpHeight);
     monitorNumber = "#0";
 
     // Parse --test-modes: WxH,WxH@FHz,... (frequency defaults to currentFrequency if omitted)
@@ -240,7 +218,8 @@ else
         Console.Error.WriteLine($"WARNING: SetProcessDpiAwareness failed with HRESULT 0x{dpiAwarenessResult:X8}.");
     }
 
-    IntPtr monitorHandle = NativeMethods.MonitorFromPoint(new NativeMethods.POINT { x = 0, y = 1 }, MONITOR_DEFAULTTONEAREST);
+    IntPtr consoleWindow = NativeMethods.GetConsoleWindow();
+    IntPtr monitorHandle = NativeMethods.MonitorFromWindow(consoleWindow, MONITOR_DEFAULTTONEAREST);
 
     var monitorInfo = new NativeMethods.MONITORINFOEX();
     monitorInfo.cbSize = Marshal.SizeOf<NativeMethods.MONITORINFOEX>();
@@ -261,16 +240,13 @@ else
         return 1;
     }
 
-    int dpiResult = NativeMethods.GetDpiForMonitor(monitorHandle, MDT_EFFECTIVE_DPI, out uint dpiX, out _);
+    int dpiResult = NativeMethods.GetDpiForMonitor(monitorHandle, MDT_EFFECTIVE_DPI, out dpiX, out _);
     if (dpiResult != 0)
     {
         Console.WriteLine($"ERROR: GetDpiForMonitor failed with HRESULT 0x{dpiResult:X8}.");
         return 1;
     }
-    dpiScale = dpiX / 96.0;
-    chromeWidth = ChromeWidth96Dpi * dpiScale;
-    chromeHeight = ChromeHeight96Dpi * dpiScale;
-    minimumHeight = (int)Math.Ceiling(rdpHeight + chromeHeight);
+    (dpiScale, chromeWidth, chromeHeight, minimumHeight) = ComputeDisplayMetrics(dpiX, rdpHeight);
 
     currentFrequency = (int)currentSettings.dmDisplayFrequency;
     currentWidth = (int)currentSettings.dmPelsWidth;
@@ -322,6 +298,8 @@ var computed = new List<MonitorResolution>();
 foreach (var mode in modes)
 {
     int zoomFactor = Math.Min((int)Math.Floor((mode.Height - chromeHeight) / rdpHeight), MaxZoom);
+    if (zoomFactor < 1)
+        continue;
     double windowWidth = rdpWidth * zoomFactor + chromeWidth;
     double windowHeight = rdpHeight * zoomFactor + chromeHeight;
     int widthUsage = (int)Math.Round(windowWidth / mode.Width * 100);
@@ -355,7 +333,7 @@ for (int zoom = 1; zoom <= MaxZoom; zoom++)
     int winW = (int)Math.Ceiling(rdpWidth * zoom + chromeWidth);
     int winH = (int)Math.Ceiling(rdpHeight * zoom + chromeHeight);
     int x1 = currentWidth - 1;
-    int x0 = x1 - winW;
+    int x0 = Math.Max(0, x1 - winW);
     Console.WriteLine($"{rdpLabel} {zoom * 100}% rdp zoom: winposstr:s:0,1,0,0,{winW},{winH}  2nd: winposstr:s:0,1,{x0},0,{x1},{winH}");
 }
 
@@ -535,6 +513,15 @@ static bool ModeMatchesFilter(int width, int height, int frequency, int targetFr
     return Math.Abs(ratio - targetRatio) < ratioTolerance;
 }
 
+static (double DpiScale, double ChromeWidth, double ChromeHeight, int MinimumHeight) ComputeDisplayMetrics(uint dpiX, int rdpHeight)
+{
+    double dpiScale = dpiX / 96.0;
+    double chromeWidth = ChromeWidth96Dpi * dpiScale;
+    double chromeHeight = ChromeHeight96Dpi * dpiScale;
+    int minimumHeight = (int)Math.Ceiling(rdpHeight + chromeHeight);
+    return (dpiScale, chromeWidth, chromeHeight, minimumHeight);
+}
+
 static int Gcd(int a, int b)
 {
     while (b != 0) { int t = b; b = a % b; a = t; }
@@ -602,13 +589,6 @@ static class NativeMethods
         public int bottom;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct POINT
-    {
-        public int x;
-        public int y;
-    }
-
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     public struct MONITORINFOEX
     {
@@ -620,11 +600,14 @@ static class NativeMethods
         public string szDevice;
     }
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern bool EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
 
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+
     [DllImport("user32.dll")]
-    public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+    public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
 
     [DllImport("shcore.dll")]
     public static extern int SetProcessDpiAwareness(int awareness);

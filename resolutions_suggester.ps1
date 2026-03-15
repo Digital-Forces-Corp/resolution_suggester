@@ -36,7 +36,7 @@ while ($argIndex -lt $InputArgs.Count) {
         Write-Host "                     winposstr and RDP resolution settings in the .rdp file"
         return
     }
-    elseif (($arg -eq '--rdp-resolution' -or $arg -eq '-r') -and (($argIndex + 1 -ge $InputArgs.Count) -or ($argIndex + 1 -lt $InputArgs.Count -and $InputArgs[$argIndex + 1].StartsWith('--')) -or ($argIndex + 1 -lt $InputArgs.Count -and $InputArgs[$argIndex + 1] -eq '-h'))) {
+    elseif (($arg -eq '--rdp-resolution' -or $arg -eq '-r') -and (($argIndex + 1 -ge $InputArgs.Count) -or $InputArgs[$argIndex + 1].StartsWith('--') -or $InputArgs[$argIndex + 1] -eq '-h')) {
         $commonRdpResolutions = @(
             @{ W = 800;  H = 600;  Ratio = '4:3';   Name = 'SVGA' }
             @{ W = 1024; H = 768;  Ratio = '4:3';   Name = 'XGA' }
@@ -62,17 +62,7 @@ while ($argIndex -lt $InputArgs.Count) {
             $ratioStr = $resItem.Ratio
             Write-Host "  $num. $($resolutionStr.PadRight(10)) $($ratioStr.PadRight(6)) $($resItem.Name)"
         }
-        Write-Host "Select RDP resolution: " -NoNewline
-        $resChoice = [Console]::In.ReadLine()
-        if ($null -eq $resChoice) {
-            Write-Host "ERROR: No input received."
-            exit 1
-        }
-        $resNum = 0
-        if (-not [int]::TryParse($resChoice, [ref]$resNum) -or $resNum -lt 1 -or $resNum -gt $commonRdpResolutions.Count) {
-            Write-Host "Invalid selection."
-            exit 1
-        }
+        $resNum = Read-MenuChoice "Select RDP resolution: " 1 $commonRdpResolutions.Count
         $rdpWidth = $commonRdpResolutions[$resNum - 1].W
         $rdpHeight = $commonRdpResolutions[$resNum - 1].H
     }
@@ -83,14 +73,6 @@ while ($argIndex -lt $InputArgs.Count) {
             $widthVal = 0
             if ([int]::TryParse($parts[0], [ref]$widthVal)) {
                 $rdpWidth = $widthVal
-                if ($rdpWidth -le 0) {
-                    Write-Host "RDP width must be a positive integer."
-                    exit 1
-                }
-                if ($rdpWidth -gt $MaxRdpDimension) {
-                    Write-Host "RDP width exceeds maximum of $MaxRdpDimension."
-                    exit 1
-                }
                 $rdpHeight = 0  # derive from monitor aspect ratio after detection
             }
             else {
@@ -115,14 +97,6 @@ while ($argIndex -lt $InputArgs.Count) {
                 Write-Host "Invalid aspect ratio. Use N:D (e.g. 16:9, 4:3)."
                 exit 1
             }
-            if ($rdpWidth -le 0 -or $rdpHeight -le 0) {
-                Write-Host "RDP width and height must be positive integers."
-                exit 1
-            }
-            if ($rdpWidth -gt $MaxRdpDimension -or $rdpHeight -gt $MaxRdpDimension) {
-                Write-Host "RDP dimensions exceed maximum of ${MaxRdpDimension}x${MaxRdpDimension}."
-                exit 1
-            }
         }
         elseif ($parts.Count -eq 2) {
             $wVal = 0
@@ -130,14 +104,6 @@ while ($argIndex -lt $InputArgs.Count) {
             if ([int]::TryParse($parts[0], [ref]$wVal) -and [int]::TryParse($parts[1], [ref]$hVal)) {
                 $rdpWidth = $wVal
                 $rdpHeight = $hVal
-                if ($rdpWidth -le 0 -or $rdpHeight -le 0) {
-                    Write-Host "RDP width and height must be positive integers."
-                    exit 1
-                }
-                if ($rdpWidth -gt $MaxRdpDimension -or $rdpHeight -gt $MaxRdpDimension) {
-                    Write-Host "RDP dimensions exceed maximum of ${MaxRdpDimension}x${MaxRdpDimension}."
-                    exit 1
-                }
             }
             else {
                 Write-Host $InvalidResolutionFormatMsg
@@ -146,6 +112,17 @@ while ($argIndex -lt $InputArgs.Count) {
         }
         else {
             Write-Host $InvalidResolutionFormatMsg
+            exit 1
+        }
+        $widthOnly = $rdpHeight -eq 0 -and $parts.Count -eq 1
+        if ($rdpWidth -le 0 -or (-not $widthOnly -and $rdpHeight -le 0)) {
+            $msg = if ($widthOnly) { "RDP width must be a positive integer." } else { "RDP width and height must be positive integers." }
+            Write-Host $msg
+            exit 1
+        }
+        if ($rdpWidth -gt $MaxRdpDimension -or (-not $widthOnly -and $rdpHeight -gt $MaxRdpDimension)) {
+            $msg = if ($widthOnly) { "RDP width exceeds maximum of $MaxRdpDimension." } else { "RDP dimensions exceed maximum of ${MaxRdpDimension}x${MaxRdpDimension}." }
+            Write-Host $msg
             exit 1
         }
     }
@@ -182,7 +159,36 @@ foreach ($pathArg in $pathArgs) {
     }
 }
 
+function Read-MenuChoice([string]$Prompt, [int]$Min, [int]$Max) {
+    Write-Host "$Prompt" -NoNewline
+    $menuInput = [Console]::In.ReadLine()
+    if ($null -eq $menuInput) {
+        Write-Host "ERROR: No input received."
+        exit 1
+    }
+    $parsed = 0
+    if (-not [int]::TryParse($menuInput, [ref]$parsed) -or $parsed -lt $Min -or $parsed -gt $Max) {
+        Write-Host "Invalid selection."
+        exit 1
+    }
+    return $parsed
+}
+
 function Get-Gcd([int]$a, [int]$b) { while ($b -ne 0) { $t = $b; $b = $a % $b; $a = $t } return $a }
+
+function Write-ResolutionOptions([array]$Sorted, [int]$WindowCount, [string]$RdpLabel, [bool]$Interactive, [ref]$OptionNumber, [ref]$MonitorResolutions) {
+    Write-Host "`n--- Available monitor resolutions for $WindowCount $RdpLabel with same ratio and frequency sorted by area used ---"
+    foreach ($res in $Sorted) {
+        $marker = if ($res.IsCurrent) { "*" } else { "" }
+        $prefix = if ($Interactive) { "  $($OptionNumber.Value). " } else { "" }
+        $areaPercent = if ($WindowCount -eq 1) { $res.AreaOnePercent } else { $res.AreaTwoPercent }
+        $widthPercent = if ($WindowCount -eq 1) { $res.WidthUsage } else { [Math]::Min($res.WidthUsageTwo, 100) }
+        $overlapNote = if ($WindowCount -eq 2 -and $res.WidthUsageTwo -gt 100) { ", $($res.WidthUsageTwo - 100)% overlap" } else { "" }
+        Write-Host "$prefix$marker$($res.Width)x$($res.Height), $areaPercent% area ($widthPercent% width, $($res.HeightUsage)% height$overlapNote), $($res.ZoomFactor * 100)% rdp zoom"
+        $MonitorResolutions.Value += $res
+        $OptionNumber.Value++
+    }
+}
 
 function Get-FilteredModes([array]$Modes, [int]$TargetFrequency, [int]$MinimumHeight, [double]$TargetRatio, [double]$RatioToleranceParam) {
     $seen = @{}
@@ -249,7 +255,6 @@ if ($testMonitor) {
 
     # Derive height from monitor aspect ratio when only width was specified
     if ($rdpHeight -eq 0) {
-        if ($currentRatio -eq 0) { Write-Host "ERROR: Monitor reported zero height."; exit 1 }
         $rdpHeight = [int][Math]::Round($rdpWidth / $currentRatio)
         $minimumHeight = [int][Math]::Ceiling($rdpHeight + $chromeHeight)
 
@@ -264,6 +269,8 @@ if ($testMonitor) {
     }
 
     # Compute monitor resolution options for each mode
+    # NOTE: This zoom/area computation duplicates the embedded C# real-monitor path.
+    # Not worth deduplicating — calling C# from the test path would add complexity for no gain.
     $computed = @()
     foreach ($mode in $modes) {
         $zoom = [Math]::Min([int][Math]::Floor(($mode.Height - $chromeHeight) / $rdpHeight), $MaxZoom)
@@ -389,13 +396,6 @@ public class MonitorResolutions
         public int bottom;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct POINT
-    {
-        public int x;
-        public int y;
-    }
-
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     public struct MONITORINFOEX
     {
@@ -407,11 +407,14 @@ public class MonitorResolutions
         public string szDevice;
     }
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern bool EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
 
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+
     [DllImport("user32.dll")]
-    public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+    public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
 
     [DllImport("shcore.dll")]
     public static extern int SetProcessDpiAwareness(int awareness);
@@ -422,16 +425,14 @@ public class MonitorResolutions
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX lpmi);
 
-    const double RatioTolerance = 0.001;
-
     static int Gcd(int a, int b) { while (b != 0) { int t = b; b = a % b; a = t; } return a; }
 
-    public static DisplayResult GetMonitorData(int rdp_width, int rdp_height, int max_zoom, double chrome_width_96dpi, double chrome_height_96dpi)
+    public static DisplayResult GetMonitorData(int rdp_width, int rdp_height, int max_zoom, double chrome_width_96dpi, double chrome_height_96dpi, double ratio_tolerance)
     {
         DEVMODE devMode = new DEVMODE();
-        devMode.dmSize = (short)Marshal.SizeOf(devMode);
+        devMode.dmSize = (short)Marshal.SizeOf<DEVMODE>();
         DEVMODE currentSettings = new DEVMODE();
-        currentSettings.dmSize = (short)Marshal.SizeOf(currentSettings);
+        currentSettings.dmSize = (short)Marshal.SizeOf<DEVMODE>();
         int modeIndex = 0;
         HashSet<string> addedMonitorResolutions = new HashSet<string>();
         List<MonitorResolution> monitorResolutions = new List<MonitorResolution>();
@@ -443,10 +444,11 @@ public class MonitorResolutions
             return new DisplayResult { Error = string.Format("WARNING: SetProcessDpiAwareness failed with HRESULT 0x{0:X8}.", dpiAwarenessResult) };
         }
 
-        IntPtr monitorHandle = MonitorFromPoint(new POINT { x = 0, y = 1 }, 2); // MONITOR_DEFAULTTONEAREST
+        IntPtr consoleWindow = GetConsoleWindow();
+        IntPtr monitorHandle = MonitorFromWindow(consoleWindow, 2); // MONITOR_DEFAULTTONEAREST
 
         MONITORINFOEX monitorInfo = new MONITORINFOEX();
-        monitorInfo.cbSize = Marshal.SizeOf(monitorInfo);
+        monitorInfo.cbSize = Marshal.SizeOf<MONITORINFOEX>();
         if (!GetMonitorInfo(monitorHandle, ref monitorInfo))
         {
             return new DisplayResult { Error = "ERROR: Failed to retrieve monitor info." };
@@ -491,7 +493,7 @@ public class MonitorResolutions
             {
                 double ratio = (double)devMode.dmPelsWidth / devMode.dmPelsHeight;
 
-                if (Math.Abs(ratio - currentRatio) < RatioTolerance)
+                if (Math.Abs(ratio - currentRatio) < ratio_tolerance)
                 {
                     string monitorResolutionKey = devMode.dmPelsWidth + "x" + devMode.dmPelsHeight;
                     if (addedMonitorResolutions.Add(monitorResolutionKey))
@@ -570,7 +572,7 @@ if (-not ($typeName -as [type])) {
 
 $type = $typeName -as [type]
 if ($null -eq $type) { Write-Host "ERROR: Failed to load P/Invoke type '$typeName'."; exit 1 }
-$result = $type::GetMonitorData($rdpWidth, $rdpHeight, $MaxZoom, $ChromeWidthAt96Dpi, $ChromeHeightAt96Dpi)
+$result = $type::GetMonitorData($rdpWidth, $rdpHeight, $MaxZoom, $ChromeWidthAt96Dpi, $ChromeHeightAt96Dpi, $RatioTolerance)
 if ($result.Error) {
     Write-Host $result.Error
     exit 1
@@ -592,7 +594,7 @@ for ($zoom = 1; $zoom -le $MaxZoom; $zoom++) {
     $winW = [Math]::Ceiling($rdpWidth * $zoom + $result.ChromeWidth)
     $winH = [Math]::Ceiling($rdpHeight * $zoom + $result.ChromeHeight)
     $x1 = $result.CurrentWidth - 1
-    $x0 = $x1 - $winW
+    $x0 = [Math]::Max(0, $x1 - $winW)
     Write-Host "$rdpLabel $($zoom * 100)% rdp zoom: winposstr:s:0,1,0,0,$winW,$winH  2nd: winposstr:s:0,1,$x0,0,$x1,$winH"
 }
 
@@ -600,29 +602,12 @@ $interactive = $rdpPaths.Count -gt 0
 $monitorResolutions = @()
 $optionNumber = 1
 
-# Display 1-window options sorted by area
+# Display 1-window and 2-window options sorted by area
 $oneWindowSorted = @($result.Computed | Sort-Object -Property AreaOnePercent -Descending)
-Write-Host "`n--- Available monitor resolutions for 1 $rdpLabel with same ratio and frequency sorted by area used ---"
-foreach ($res in $oneWindowSorted) {
-    $marker = if ($res.IsCurrent) { "*" } else { "" }
-    $prefix = if ($interactive) { "  $optionNumber. " } else { "" }
-    Write-Host "$prefix$marker$($res.Width)x$($res.Height), $($res.AreaOnePercent)% area ($($res.WidthUsage)% width, $($res.HeightUsage)% height), $($res.ZoomFactor * 100)% rdp zoom"
-    $monitorResolutions += $res
-    $optionNumber++
-}
+Write-ResolutionOptions -Sorted $oneWindowSorted -WindowCount 1 -RdpLabel $rdpLabel -Interactive $interactive -OptionNumber ([ref]$optionNumber) -MonitorResolutions ([ref]$monitorResolutions)
 
-# Display 2-window options sorted by area
 $twoWindowSorted = @($result.Computed | Sort-Object -Property AreaTwoPercent -Descending)
-Write-Host "`n--- Available monitor resolutions for 2 $rdpLabel with same ratio and frequency sorted by area used ---"
-foreach ($res in $twoWindowSorted) {
-    $marker = if ($res.IsCurrent) { "*" } else { "" }
-    $widthCapped = [Math]::Min($res.WidthUsageTwo, 100)
-    $overlapNote = if ($res.WidthUsageTwo -gt 100) { ", $($res.WidthUsageTwo - 100)% overlap" } else { "" }
-    $prefix = if ($interactive) { "  $optionNumber. " } else { "" }
-    Write-Host "$prefix$marker$($res.Width)x$($res.Height), $($res.AreaTwoPercent)% area ($widthCapped% width, $($res.HeightUsage)% height$overlapNote), $($res.ZoomFactor * 100)% rdp zoom"
-    $monitorResolutions += $res
-    $optionNumber++
-}
+Write-ResolutionOptions -Sorted $twoWindowSorted -WindowCount 2 -RdpLabel $rdpLabel -Interactive $interactive -OptionNumber ([ref]$optionNumber) -MonitorResolutions ([ref]$monitorResolutions)
 
 if (-not $interactive) {
     return
@@ -630,17 +615,7 @@ if (-not $interactive) {
 
 # Interactive mode: select monitor resolution, rdp file, and position
 Write-Host ""
-Write-Host "Select monitor resolution: " -NoNewline
-$choiceText = [Console]::In.ReadLine()
-if ($null -eq $choiceText) {
-    Write-Host "ERROR: No input received."
-    exit 1
-}
-$choiceNum = 0
-if (-not [int]::TryParse($choiceText, [ref]$choiceNum) -or $choiceNum -lt 1 -or $choiceNum -gt $monitorResolutions.Count) {
-    Write-Host "Invalid selection."
-    exit 1
-}
+$choiceNum = Read-MenuChoice "Select monitor resolution: " 1 $monitorResolutions.Count
 $monitorResolutionSelected = $monitorResolutions[$choiceNum - 1]
 
 # If multiple RDP files, ask which one
@@ -650,17 +625,7 @@ if ($rdpPaths.Count -gt 1) {
     for ($rdpIndex = 0; $rdpIndex -lt $rdpPaths.Count; $rdpIndex++) {
         Write-Host "  $($rdpIndex + 1). $($rdpPaths[$rdpIndex])"
     }
-    Write-Host "Select RDP file: " -NoNewline
-    $rdpChoiceText = [Console]::In.ReadLine()
-    if ($null -eq $rdpChoiceText) {
-        Write-Host "ERROR: No input received."
-        exit 1
-    }
-    $rdpChoiceNum = 0
-    if (-not [int]::TryParse($rdpChoiceText, [ref]$rdpChoiceNum) -or $rdpChoiceNum -lt 1 -or $rdpChoiceNum -gt $rdpPaths.Count) {
-        Write-Host "Invalid selection."
-        exit 1
-    }
+    $rdpChoiceNum = Read-MenuChoice "Select RDP file: " 1 $rdpPaths.Count
     $targetPath = $rdpPaths[$rdpChoiceNum - 1]
 }
 
