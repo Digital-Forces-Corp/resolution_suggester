@@ -17,11 +17,11 @@ static class MonitorOracle
         public short dmDriverVersion;
         public short dmSize;
         public short dmDriverExtra;
-        public int dmFields;
+        public uint dmFields;
         public int dmPositionX;
         public int dmPositionY;
-        public int dmDisplayOrientation;
-        public int dmDisplayFixedOutput;
+        public uint dmDisplayOrientation;
+        public uint dmDisplayFixedOutput;
         public short dmColor;
         public short dmDuplex;
         public short dmYResolution;
@@ -30,19 +30,19 @@ static class MonitorOracle
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string dmFormName;
         public short dmLogPixels;
-        public int dmBitsPerPel;
-        public int dmPelsWidth;
-        public int dmPelsHeight;
-        public int dmDisplayFlags;
-        public int dmDisplayFrequency;
-        public int dmICMMethod;
-        public int dmICMIntent;
-        public int dmMediaType;
-        public int dmDitherType;
-        public int dmReserved1;
-        public int dmReserved2;
-        public int dmPanningWidth;
-        public int dmPanningHeight;
+        public uint dmBitsPerPel;
+        public uint dmPelsWidth;
+        public uint dmPelsHeight;
+        public uint dmDisplayFlags;
+        public uint dmDisplayFrequency;
+        public uint dmICMMethod;
+        public uint dmICMIntent;
+        public uint dmMediaType;
+        public uint dmDitherType;
+        public uint dmReserved1;
+        public uint dmReserved2;
+        public uint dmPanningWidth;
+        public uint dmPanningHeight;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -116,10 +116,12 @@ static class MonitorOracle
         if (dpiX != dpiY)
             throw new Exception($"Asymmetric DPI not supported: dpiX={dpiX}, dpiY={dpiY}");
 
-        int gcd = Gcd(devMode.dmPelsWidth, devMode.dmPelsHeight);
-        string ratio = $"{devMode.dmPelsWidth / gcd}:{devMode.dmPelsHeight / gcd}";
+        int width = (int)devMode.dmPelsWidth;
+        int height = (int)devMode.dmPelsHeight;
+        int gcd = Gcd(width, height);
+        string ratio = $"{width / gcd}:{height / gcd}";
 
-        return new MonitorData(devMode.dmPelsWidth, devMode.dmPelsHeight, devMode.dmDisplayFrequency, dpiX, ratio);
+        return new MonitorData(width, height, (int)devMode.dmDisplayFrequency, dpiX, ratio);
     }
 
     static int Gcd(int a, int b) { while (b != 0) { int t = b; b = a % b; a = t; } return a; }

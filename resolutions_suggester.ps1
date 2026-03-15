@@ -322,11 +322,11 @@ public class MonitorResolutions
         public short dmDriverVersion;
         public short dmSize;
         public short dmDriverExtra;
-        public int dmFields;
+        public uint dmFields;
         public int dmPositionX;
         public int dmPositionY;
-        public int dmDisplayOrientation;
-        public int dmDisplayFixedOutput;
+        public uint dmDisplayOrientation;
+        public uint dmDisplayFixedOutput;
         public short dmColor;
         public short dmDuplex;
         public short dmYResolution;
@@ -335,19 +335,19 @@ public class MonitorResolutions
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string dmFormName;
         public short dmLogPixels;
-        public int dmBitsPerPel;
-        public int dmPelsWidth;
-        public int dmPelsHeight;
-        public int dmDisplayFlags;
-        public int dmDisplayFrequency;
-        public int dmICMMethod;
-        public int dmICMIntent;
-        public int dmMediaType;
-        public int dmDitherType;
-        public int dmReserved1;
-        public int dmReserved2;
-        public int dmPanningWidth;
-        public int dmPanningHeight;
+        public uint dmBitsPerPel;
+        public uint dmPelsWidth;
+        public uint dmPelsHeight;
+        public uint dmDisplayFlags;
+        public uint dmDisplayFrequency;
+        public uint dmICMMethod;
+        public uint dmICMIntent;
+        public uint dmMediaType;
+        public uint dmDitherType;
+        public uint dmReserved1;
+        public uint dmReserved2;
+        public uint dmPanningWidth;
+        public uint dmPanningHeight;
     }
 
     public class MonitorResolution
@@ -470,9 +470,9 @@ public class MonitorResolutions
         double chromeWidth = chrome_width_96dpi * dpiScale;
         double chromeHeight = chrome_height_96dpi * dpiScale;
 
-        int currentFrequency = currentSettings.dmDisplayFrequency;
-        int currentWidth = currentSettings.dmPelsWidth;
-        int currentHeight = currentSettings.dmPelsHeight;
+        int currentFrequency = (int)currentSettings.dmDisplayFrequency;
+        int currentWidth = (int)currentSettings.dmPelsWidth;
+        int currentHeight = (int)currentSettings.dmPelsHeight;
         int ratioGcd = Gcd(currentWidth, currentHeight);
         string currentRatioDisplay = (currentWidth / ratioGcd) + ":" + (currentHeight / ratioGcd);
         double currentRatio = (double)currentWidth / currentHeight;
@@ -487,7 +487,7 @@ public class MonitorResolutions
 
         while (EnumDisplaySettings(deviceName, modeIndex, ref devMode))
         {
-            if (devMode.dmDisplayFrequency == currentFrequency && devMode.dmPelsHeight >= minimum_height && devMode.dmPelsHeight > 0)
+            if ((int)devMode.dmDisplayFrequency == currentFrequency && (int)devMode.dmPelsHeight >= minimum_height && devMode.dmPelsHeight > 0)
             {
                 double ratio = (double)devMode.dmPelsWidth / devMode.dmPelsHeight;
 
@@ -498,8 +498,8 @@ public class MonitorResolutions
                     {
                         monitorResolutions.Add(new MonitorResolution
                         {
-                            Width = devMode.dmPelsWidth,
-                            Height = devMode.dmPelsHeight
+                            Width = (int)devMode.dmPelsWidth,
+                            Height = (int)devMode.dmPelsHeight
                         });
                     }
                 }

@@ -272,9 +272,9 @@ else
     chromeHeight = ChromeHeight96Dpi * dpiScale;
     minimumHeight = (int)Math.Ceiling(rdpHeight + chromeHeight);
 
-    currentFrequency = currentSettings.dmDisplayFrequency;
-    currentWidth = currentSettings.dmPelsWidth;
-    currentHeight = currentSettings.dmPelsHeight;
+    currentFrequency = (int)currentSettings.dmDisplayFrequency;
+    currentWidth = (int)currentSettings.dmPelsWidth;
+    currentHeight = (int)currentSettings.dmPelsHeight;
 
     currentRatio = (double)currentWidth / currentHeight;
     var devMode = new NativeMethods.DEVMODE();
@@ -282,11 +282,11 @@ else
     int modeIndex = 0;
     while (NativeMethods.EnumDisplaySettings(deviceName, modeIndex, ref devMode))
     {
-        if (ModeMatchesFilter(devMode.dmPelsWidth, devMode.dmPelsHeight, devMode.dmDisplayFrequency, currentFrequency, minimumHeight, currentRatio, RatioTolerance))
+        if (ModeMatchesFilter((int)devMode.dmPelsWidth, (int)devMode.dmPelsHeight, (int)devMode.dmDisplayFrequency, currentFrequency, minimumHeight, currentRatio, RatioTolerance))
         {
             string key = $"{devMode.dmPelsWidth}x{devMode.dmPelsHeight}";
             if (seen.Add(key))
-                modes.Add((devMode.dmPelsWidth, devMode.dmPelsHeight));
+                modes.Add(((int)devMode.dmPelsWidth, (int)devMode.dmPelsHeight));
         }
         modeIndex++;
     }
@@ -565,11 +565,11 @@ static class NativeMethods
         public short dmDriverVersion;
         public short dmSize;
         public short dmDriverExtra;
-        public int dmFields;
+        public uint dmFields;
         public int dmPositionX;
         public int dmPositionY;
-        public int dmDisplayOrientation;
-        public int dmDisplayFixedOutput;
+        public uint dmDisplayOrientation;
+        public uint dmDisplayFixedOutput;
         public short dmColor;
         public short dmDuplex;
         public short dmYResolution;
@@ -578,19 +578,19 @@ static class NativeMethods
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string dmFormName;
         public short dmLogPixels;
-        public int dmBitsPerPel;
-        public int dmPelsWidth;
-        public int dmPelsHeight;
-        public int dmDisplayFlags;
-        public int dmDisplayFrequency;
-        public int dmICMMethod;
-        public int dmICMIntent;
-        public int dmMediaType;
-        public int dmDitherType;
-        public int dmReserved1;
-        public int dmReserved2;
-        public int dmPanningWidth;
-        public int dmPanningHeight;
+        public uint dmBitsPerPel;
+        public uint dmPelsWidth;
+        public uint dmPelsHeight;
+        public uint dmDisplayFlags;
+        public uint dmDisplayFrequency;
+        public uint dmICMMethod;
+        public uint dmICMIntent;
+        public uint dmMediaType;
+        public uint dmDitherType;
+        public uint dmReserved1;
+        public uint dmReserved2;
+        public uint dmPanningWidth;
+        public uint dmPanningHeight;
     }
 
     [StructLayout(LayoutKind.Sequential)]

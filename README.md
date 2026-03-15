@@ -120,12 +120,12 @@ The package uses `InstallerType: portable` (bare `.exe`, no installer). Referenc
 - [Ahoy.Ahoy](https://github.com/microsoft/winget-pkgs/tree/master/manifests/a/Ahoy/Ahoy)
 - [pnpm.pnpm](https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/pnpm/pnpm)
 
-winget PR validation and merge times vary widely. Observed times for these portable packages (March 2025 \- March 2026):
+Observed wingetbot "run" to "Validation-Completed" label durations (March 2026):
 
-- New version PRs: 2 hours to 3 days
-- New package PRs: ~3 days (7zip.7zr 25.01, the only first-submission data point)
+- New version PRs: 3\-4 hours (Wasmtime.Portable #342512, #342914)
+- New package PRs: 8\-18 hours (#348596, #348292, #348215, #348209)
 
-The pipeline runs validation checks (manifest content, installer verification, post-validation) and then a maintainer must approve the merge. Most of the elapsed time is queue depth and maintainer availability, not the validation itself.
+The Installation Verification step reports "InProgress" every ~50 minutes during validation. New version PRs (Wasmtime.Portable) received "Validation-Completed" within the same day; new package PRs took overnight.
 
 ```
 git tag v1.2.0
