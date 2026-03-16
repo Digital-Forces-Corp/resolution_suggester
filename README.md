@@ -27,11 +27,7 @@ Self-contained executable (~12MB, no dependencies):
 curl.exe -Lo c:\dfc\scripts\resolution_suggester.exe https://github.com/Digital-Forces-Corp/resolution_suggester/releases/latest/download/resolution_suggester.exe
 ```
 
-Or via winget (installs to winget's default location on PATH, not `c:\dfc\scripts`):
-
-```
-winget install DigitalForcesCorp.ResolutionSuggester
-```
+Winget distribution is planned as future work. The previous winget package delivered the C# executable, which has been removed. Winget does not support delivering PowerShell scripts directly, so a new packaging approach is needed before winget installs can resume.
 
 ## Requirements
 

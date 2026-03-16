@@ -48,17 +48,3 @@ jobs:
         with:
           files: publish/resolution_suggester.exe
           generate_release_notes: true
-
-  winget:
-    needs: release
-    runs-on: windows-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Submit to winget
-        uses: vedantmgoyal9/winget-releaser@a507e50fd7dd7c27a3770a07e1bab6c1aa2e3dfa # v2
-        with:
-          identifier: DigitalForcesCorp.ResolutionSuggester
-          version: ${{ needs.release.outputs.version }}
-          installers-regex: '\.exe$'
-          token: ${{ secrets.WINGET_TOKEN }}

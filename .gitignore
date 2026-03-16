@@ -16,11 +16,8 @@ publish/
 *.log
 *.nupkg
 *.snupkg
-[Dd]ebug/
-[Rr]elease/
 *.cache
 project.lock.json
 packages/
 .dotnet/
-*.DotSettings.user
 *.diff

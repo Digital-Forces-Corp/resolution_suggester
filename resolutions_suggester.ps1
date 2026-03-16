@@ -30,7 +30,7 @@ function Get-Gcd([int]$a, [int]$b) { while ($b -ne 0) { $t = $b; $b = $a % $b; $
 function Write-ResolutionOptions([array]$Sorted, [int]$WindowCount, [string]$RdpLabel, [bool]$Interactive, [ref]$OptionNumber, [ref]$MonitorResolutions) {
     Write-Host "`n--- Available monitor resolutions for $WindowCount $RdpLabel with same ratio and frequency sorted by area used ---"
     foreach ($res in $Sorted) {
-        $marker = if ($res.IsCurrent) { "*" } else { "" }
+        $marker = if ($res.IsCurrent) { "*" } else { " " }
         $prefix = if ($Interactive) { "  $($OptionNumber.Value). " } else { "" }
         $areaPercent = if ($WindowCount -eq 1) { $res.AreaOnePercent } else { $res.AreaTwoPercent }
         $widthPercent = if ($WindowCount -eq 1) { $res.WidthUsage } else { [Math]::Min($res.WidthUsageTwo, 100) }
@@ -225,7 +225,6 @@ if ($testMonitor) {
     $dpiScale = $dpiX / 96.0
     $chromeWidth = $ChromeWidthAt96Dpi * $dpiScale
     $chromeHeight = $ChromeHeightAt96Dpi * $dpiScale
-    $minimumHeight = [int][Math]::Ceiling($rdpHeight + $chromeHeight)
     $monitorNumber = "#0"
 
     $ratioGcd = Get-Gcd $currentWidth $currentHeight
@@ -251,22 +250,13 @@ if ($testMonitor) {
         $parsedModes += @{ Width = $modeW; Height = $modeH; Frequency = $modeFreq }
     }
 
-    $modes = Get-FilteredModes -Modes $parsedModes -TargetFrequency $currentFrequency -MinimumHeight $minimumHeight -TargetRatio $currentRatio -RatioToleranceParam $RatioTolerance
-
     # Derive height from monitor aspect ratio when only width was specified
     if ($rdpHeight -eq 0) {
         $rdpHeight = [int][Math]::Round($rdpWidth / $currentRatio)
-        $minimumHeight = [int][Math]::Ceiling($rdpHeight + $chromeHeight)
-
-        # Re-filter modes with updated minimumHeight
-        $filteredModes = @()
-        foreach ($mode in $modes) {
-            if ($mode.Height -ge $minimumHeight) {
-                $filteredModes += $mode
-            }
-        }
-        $modes = $filteredModes
     }
+
+    $minimumHeight = [int][Math]::Ceiling($rdpHeight + $chromeHeight)
+    $modes = Get-FilteredModes -Modes $parsedModes -TargetFrequency $currentFrequency -MinimumHeight $minimumHeight -TargetRatio $currentRatio -RatioToleranceParam $RatioTolerance
 
     # Compute monitor resolution options for each mode
     # NOTE: This zoom/area computation duplicates the embedded C# real-monitor path.
@@ -591,8 +581,8 @@ Write-Host "Current Monitor $($result.MonitorNumber), $($result.CurrentWidth)x$(
 # Display winposstr reference for current monitor resolution at each zoom level
 $rdpLabel = "RDP ${rdpWidth}x${rdpHeight}"
 for ($zoom = 1; $zoom -le $MaxZoom; $zoom++) {
-    $winW = [Math]::Ceiling($rdpWidth * $zoom + $result.ChromeWidth)
-    $winH = [Math]::Ceiling($rdpHeight * $zoom + $result.ChromeHeight)
+    $winW = [int][Math]::Ceiling($rdpWidth * $zoom + $result.ChromeWidth)
+    $winH = [int][Math]::Ceiling($rdpHeight * $zoom + $result.ChromeHeight)
     $x1 = $result.CurrentWidth - 1
     $x0 = [Math]::Max(0, $x1 - $winW)
     Write-Host "$rdpLabel $($zoom * 100)% rdp zoom: winposstr:s:0,1,0,0,$winW,$winH  2nd: winposstr:s:0,1,$x0,0,$x1,$winH"

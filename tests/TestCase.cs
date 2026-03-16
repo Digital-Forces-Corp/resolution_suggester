@@ -42,7 +42,7 @@ static class TestCase
         var args = new List<string>();
 
         // --test-monitor / --test-modes for synthetic monitors
-        // -File mode passes args literally, no quoting needed for either impl
+        // -File mode passes args literally, no quoting needed for PS1
         if (row.Monitor != MonitorReal)
         {
             if (!SyntheticMonitor.All.TryGetValue(row.Monitor, out var mon))

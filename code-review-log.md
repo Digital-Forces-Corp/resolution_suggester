@@ -75,14 +75,23 @@
 70. Pairwise constraints lock RdpSettings to `all_present` for invalid_side and invalid_selection cases.
 71. .gitignore simplified from ~480 lines to ~26 essential patterns.
 72. DEVMODE CharSet.Auto on StructLayout and EnumDisplaySettings DllImport. Applied in MonitorOracle.cs and PS1.
+73. PS1 test-monitor width-only path: `$minimumHeight` and `Get-FilteredModes` deferred until after `$rdpHeight` derivation. Single filter pass, no re-filtering loop.
+74. PS1 winposstr reference display: `$winW` and `$winH` use `[int][Math]::Ceiling()`, matching interactive path.
+75. PS1 non-current resolution marker: space character `" "` for column alignment with `"*"` current marker.
+76. release.yml: winget job removed (winget cannot deliver PS1 scripts).
+77. README winget section rewritten as future work.
+78. .gitignore: removed `*.DotSettings.user` (redundant with `*.user`).
+79. .gitignore: removed `[Dd]ebug/` and `[Rr]elease/` (redundant with `[Bb]in/` and `[Oo]bj/`).
+80. Assertions.cs:290 comment: "Uses the same math as the PS1 embedded C#, computed independently."
+81. Assertions.cs:38 comment: "Help text verified against PS1 output."
+82. TestCase.cs:45 comment: "no quoting needed for PS1."
 
 ## To be discussed with user
 
-- [src/Program.cs:NativeMethods.DEVMODE] CONTRADICTION: DEVMODE struct has `[StructLayout(LayoutKind.Sequential)]` without `CharSet = CharSet.Auto`. The `EnumDisplaySettings` DllImport uses `CharSet.Auto` (resolving to `EnumDisplaySettingsW`), but the struct's `ByValTStr` fields marshal as ANSI (32 bytes) instead of Unicode (64 bytes), shifting all subsequent field offsets and corrupting values. Violates standard #72. (agents: bugs 90; evidence: PS1 embedded C# and MonitorOracle.cs both have `CharSet = CharSet.Auto` on their DEVMODE structs; Program.cs NativeMethods.DEVMODE does not)
-- [src/Program.cs:~line 167] CONTRADICTION: `SetProcessDpiAwareness` non-zero/non-E_ACCESSDENIED result writes warning to stderr and continues execution. Standard #53 requires erroring on non-zero (excluding E_ACCESSDENIED). PS1 embedded C# returns an error (exit 1). MonitorOracle.cs throws. Program.cs is the only implementation that degrades to a warning. (agents: logic 80; evidence: PS1 line 442-445 returns error, MonitorOracle throws, Program.cs line ~167 writes to Console.Error and continues)
-- [src/Program.cs] Duplicated mode-filtering loop pattern. Test-monitor branch and real-monitor branch both perform identical loop body: call `ModeMatchesFilter`, build key string, `seen.Add(key)`, append to `modes`. Could be extracted into a helper. (agents: quality 80; evidence: two loop instances with same dedup-and-filter logic, differing only in where width/height/frequency values come from)
-- [src/Program.cs] No `ReadMenuChoice` equivalent extracted. Three identical read+null-check+parse+range-check sequences: RDP resolution picker, monitor resolution selection, RDP file selection. PS1 has this extracted per standard #47. (agents: quality 80; evidence: three instances of Console.ReadLine + null check + int.TryParse + range validation + "Invalid selection" error, matching the pattern PS1 extracts into Read-MenuChoice)
 - [README.md + src/Program.cs + src/resolution_suggester.csproj] README documents building, publishing, and installing the C# executable across multiple sections (Install, Releasing, Building). Both `src/Program.cs` and `src/resolution_suggester.csproj` are deleted in the working tree. If deletions are intentional, README sections referencing the exe need revision. (agents: docs 95, docs 80; evidence: `git status` shows ` D src/Program.cs` and ` D src/resolution_suggester.csproj`; README lines 24-28, 109-148 reference the exe)
 
 ---
 Sweep run: 2026-03-15. Threshold: 80. Skipped file types: (none).
+
+---
+Sweep run: 2026-03-15 (run 2). Threshold: 80. Skipped file types: (none). Deleted files skipped: resolution_suggester.sln, src/Program.cs, src/resolution_suggester.csproj. 8 fixed, 0 skipped.

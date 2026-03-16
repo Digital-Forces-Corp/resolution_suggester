@@ -35,7 +35,7 @@ static class Assertions
         if (row.ResolutionArg == "help")
         {
             results.Add(AssertExitCode(result, 0));
-            // Help text differs between implementations
+            // Help text verified against PS1 output
             results.Add(AssertContains(result.Stdout, "[-r WxH|W|WxN:D] [paths...]", "help text"));
             return results;
         }
@@ -287,7 +287,7 @@ static class Assertions
     };
 
     /// Compute the exact expected winposstr for a synthetic monitor test case.
-    /// Uses the same math as Program.cs but computed independently.
+    /// Uses the same math as the PS1 embedded C#, computed independently.
     static string ComputeExpectedWinposstr(TestCase.PictRow row, SyntheticMonitor.MonitorDef mon, int rdpW, int rdpH)
     {
         double dpiScale = mon.Dpi / 96.0;
