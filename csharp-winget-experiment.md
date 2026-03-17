@@ -22,8 +22,6 @@ Winget does not support delivering PowerShell scripts directly, so a new packagi
 winget install DigitalForcesCorp.ResolutionSuggester
 ```
 
-Submission status: [PR #348697](https://github.com/microsoft/winget-pkgs/pull/348697#issuecomment-4061030437), [validation build](https://dev.azure.com/shine-oss/winget-pkgs/_build/results?buildId=280104&view=results).
-
 Self-contained executable install:
 
 ```
@@ -47,12 +45,29 @@ The package uses `InstallerType: portable` (bare `.exe`, no installer). Referenc
 - [Ahoy.Ahoy](https://github.com/microsoft/winget-pkgs/tree/master/manifests/a/Ahoy/Ahoy)
 - [pnpm.pnpm](https://github.com/microsoft/winget-pkgs/tree/master/manifests/p/pnpm/pnpm)
 
+## [PR #348697](https://github.com/microsoft/winget-pkgs/pull/348697) Timeline
+
+| Time (CT) | Duration | Event |
+|---|---|---|
+| Mar 14 12:20 PM | — | PR submitted |
+| Mar 14 12:21 PM | 1 min | Copilot work started |
+| Mar 14 12:38 PM | 17 min | msftrubengu comment, wingetbot picked up |
+| Mar 14 12:52 PM | 14 min | `New-Package` label applied |
+| Mar 15 12:42 AM | 11 h 50 min | `Azure-Pipeline-Passed`, `Validation-Completed` |
+| Mar 15 12:43 AM | 1 min | Auto-squash enabled |
+| Mar 16 5:36 PM | 40 h 53 min | @stephengillie manual validation and approval |
+| Mar 16 5:36 PM | 0 min | `Moderator-Approved`, merged to master |
+| Mar 16 5:37 PM | 1 min | Post-merge validation completed |
+| Mar 16 6:18 PM | 41 min | Source branch deleted |
+
+Total: ~53 hours submit-to-merge. ~12 hours automated validation, ~41 hours waiting for manual review.
+
 ## Winget Validation Timing
 
 Observed wingetbot "run" to "Validation-Completed" label durations (March 2026):
 
-- New version PRs: 3\-4 hours (Wasmtime.Portable #342512, #342914)
-- New package PRs: 8\-18 hours (#348596, #348292, #348215, #348209)
+- New version PRs: 3\-4 hours (Wasmtime.Portable `#342512`, `#342914`)
+- New package PRs: 8\-18 hours (`#348596`, `#348292`, `#348215`, `#348209`)
 
 The Installation Verification step reports "InProgress" every ~50 minutes during validation. New version PRs (Wasmtime.Portable) received "Validation-Completed" within the same day; new package PRs took overnight.
 
