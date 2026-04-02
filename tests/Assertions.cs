@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 static class Assertions
 {
     const int MaxZoom = 2;
+    const double TaskbarHeight96Dpi = 48;
     const double RatioTolerance = 0.001;
     const double ChromeWidth96Dpi = 14.0;
     const double ChromeHeight96Dpi = 55.0 / 1.5;
@@ -261,7 +262,8 @@ static class Assertions
         // This is handled by the stdout parsing below.
 
         // Check required settings exist exactly once
-        results.Add(AssertLineCount(lines, "smart sizing:i:0", 1, "smart sizing"));
+        int expectedSmartSizing = Environment.OSVersion.Version.Build >= 22000 ? 1 : 0;
+        results.Add(AssertLineCount(lines, $"smart sizing:i:{expectedSmartSizing}", 1, "smart sizing"));
         results.Add(AssertLineCount(lines, "allow font smoothing:i:1", 1, "allow font smoothing"));
         results.Add(AssertLineCount(lines, $"desktopwidth:i:{rdpW}", 1, "desktopwidth"));
         results.Add(AssertLineCount(lines, $"desktopheight:i:{rdpH}", 1, "desktopheight"));
@@ -316,8 +318,9 @@ static class Assertions
             matchingModes.Add((modeW, modeH));
         }
 
-        // Compute monitor resolution info for each mode
-        var monitorResolutions = new List<(int W, int H, int Zoom, int AreaOne, int AreaTwo)>();
+        // Compute monitor resolution info for each mode (integer zoom + taskbar zoom)
+        var monitorResolutions = new List<(int W, int H, double Zoom, int AreaOne, int AreaTwo)>();
+        double taskbarH = TaskbarHeight96Dpi * dpiScale;
         foreach (var (modeW, modeH) in matchingModes)
         {
             int zoom = Math.Min((int)Math.Floor((modeH - chromeH) / rdpH), MaxZoom);
@@ -328,14 +331,27 @@ static class Assertions
             int heightUsage = (int)Math.Round(winHeight / modeH * 100);
             int areaOne = (int)Math.Round(Math.Min(widthUsage, 100) * heightUsage / 100.0);
             int areaTwo = (int)Math.Round(Math.Min(widthUsageTwo, 100) * heightUsage / 100.0);
-            monitorResolutions.Add((modeW, modeH, zoom, areaOne, areaTwo));
+            monitorResolutions.Add((modeW, modeH, (double)zoom, areaOne, areaTwo));
+
+            double tbZoom = (modeH - chromeH - taskbarH) / rdpH;
+            if (tbZoom >= 1.0)
+            {
+                double tbWinW = rdpW * tbZoom + chromeW;
+                double tbWinH = rdpH * tbZoom + chromeH;
+                int tbWidthUsage = (int)Math.Round(tbWinW / modeW * 100);
+                int tbWidthUsageTwo = (int)Math.Round(2 * tbWinW / modeW * 100);
+                int tbHeightUsage = (int)Math.Round(tbWinH / modeH * 100);
+                int tbAreaOne = (int)Math.Round(Math.Min(tbWidthUsage, 100) * tbHeightUsage / 100.0);
+                int tbAreaTwo = (int)Math.Round(Math.Min(tbWidthUsageTwo, 100) * tbHeightUsage / 100.0);
+                monitorResolutions.Add((modeW, modeH, tbZoom, tbAreaOne, tbAreaTwo));
+            }
         }
 
         // Sort and pick the selected monitor resolution
         if (monitorResolutions.Count == 0)
             throw new InvalidOperationException("No modes passed filtering for winposstr computation");
 
-        (int selW, int selH, int selZoom, int, int) selectedMode;
+        (int selW, int selH, double selZoom, int, int) selectedMode;
         if (row.MonitorResSel == "one_window")
         {
             // Option 1 = first by area descending (one-window)

@@ -4,6 +4,7 @@ param(
 )
 
 $MaxZoom = 2
+$TaskbarHeightAt96Dpi = 48
 $ChromeHeightAt96Dpi = 55.0 / 1.5
 $ChromeWidthAt96Dpi = 14.0
 $RatioTolerance = 0.001
@@ -35,7 +36,9 @@ function Write-ResolutionOptions([array]$Sorted, [int]$WindowCount, [string]$Rdp
         $areaPercent = if ($WindowCount -eq 1) { $res.AreaOnePercent } else { $res.AreaTwoPercent }
         $widthPercent = if ($WindowCount -eq 1) { $res.WidthUsage } else { [Math]::Min($res.WidthUsageTwo, 100) }
         $overlapNote = if ($WindowCount -eq 2 -and $res.WidthUsageTwo -gt 100) { ", $($res.WidthUsageTwo - 100)% overlap" } else { "" }
-        Write-Host "$prefix$marker$($res.Width)x$($res.Height), $areaPercent% area ($widthPercent% width, $($res.HeightUsage)% height$overlapNote), $($res.ZoomFactor * 100)% rdp zoom"
+        $zoomPct = [int][Math]::Round($res.ZoomFactor * 100)
+        $zoomLabel = if ($res.ZoomFactor -eq [Math]::Floor($res.ZoomFactor)) { "rdp zoom" } else { "taskbar zoom" }
+        Write-Host "$prefix$marker$($res.Width)x$($res.Height), $areaPercent% area ($widthPercent% width, $($res.HeightUsage)% height$overlapNote), ${zoomPct}% $zoomLabel"
         $MonitorResolutions.Value += $res
         $OptionNumber.Value++
     }
@@ -286,6 +289,31 @@ if ($testMonitor) {
         }
     }
 
+    $taskbarHeight = $TaskbarHeightAt96Dpi * $dpiScale
+    $computedTaskbar = @()
+    foreach ($mode in $modes) {
+        $tbZoom = ($mode.Height - $chromeHeight - $taskbarHeight) / $rdpHeight
+        if ($tbZoom -lt 1.0) { continue }
+        $tbWinWidth = $rdpWidth * $tbZoom + $chromeWidth
+        $tbWinHeight = $rdpHeight * $tbZoom + $chromeHeight
+        $tbWidthUsage = [int][Math]::Round($tbWinWidth / $mode.Width * 100)
+        $tbWidthUsageTwo = [int][Math]::Round(2 * $tbWinWidth / $mode.Width * 100)
+        $tbHeightUsage = [int][Math]::Round($tbWinHeight / $mode.Height * 100)
+        $tbAreaOne = [Math]::Min($tbWidthUsage, 100) * $tbHeightUsage
+        $tbAreaTwo = [Math]::Min($tbWidthUsageTwo, 100) * $tbHeightUsage
+        $computedTaskbar += [PSCustomObject]@{
+            Width = $mode.Width
+            Height = $mode.Height
+            ZoomFactor = $tbZoom
+            WidthUsage = $tbWidthUsage
+            WidthUsageTwo = $tbWidthUsageTwo
+            HeightUsage = $tbHeightUsage
+            AreaOnePercent = [int][Math]::Round($tbAreaOne / 100.0)
+            AreaTwoPercent = [int][Math]::Round($tbAreaTwo / 100.0)
+            IsCurrent = ($mode.Width -eq $currentWidth -and $mode.Height -eq $currentHeight)
+        }
+    }
+
     $result = [PSCustomObject]@{
         MonitorNumber = $monitorNumber
         CurrentWidth = $currentWidth
@@ -299,6 +327,7 @@ if ($testMonitor) {
         RdpWidth = $rdpWidth
         RdpHeight = $rdpHeight
         Computed = $computed
+        ComputedTaskbar = $computedTaskbar
     }
 }
 else {
@@ -351,7 +380,7 @@ public class MonitorResolutions
     {
         public int Width;
         public int Height;
-        public int ZoomFactor;
+        public double ZoomFactor;
         public int WidthUsage;
         public int WidthUsageTwo;
         public int HeightUsage;
@@ -374,6 +403,7 @@ public class MonitorResolutions
         public int RdpWidth;
         public int RdpHeight;
         public List<MonitorResolution> Computed;
+        public List<MonitorResolution> ComputedTaskbar;
         public string Error;
     }
 
@@ -417,7 +447,7 @@ public class MonitorResolutions
 
     static int Gcd(int a, int b) { while (b != 0) { int t = b; b = a % b; a = t; } return a; }
 
-    public static DisplayResult GetMonitorData(int rdp_width, int rdp_height, int max_zoom, double chrome_width_96dpi, double chrome_height_96dpi, double ratio_tolerance)
+    public static DisplayResult GetMonitorData(int rdp_width, int rdp_height, int max_zoom, double chrome_width_96dpi, double chrome_height_96dpi, double ratio_tolerance, double taskbar_height_96dpi)
     {
         DEVMODE devMode = new DEVMODE();
         devMode.dmSize = (short)Marshal.SizeOf<DEVMODE>();
@@ -528,6 +558,34 @@ public class MonitorResolutions
             });
         }
 
+        var computedTaskbar = new List<MonitorResolution>();
+        double taskbarHeight = taskbar_height_96dpi * dpiScale;
+        foreach (var monitorResolution in monitorResolutions)
+        {
+            double taskbarZoom = (monitorResolution.Height - chromeHeight - taskbarHeight) / rdp_height;
+            if (taskbarZoom < 1.0) continue;
+            double tbWinW = rdp_width * taskbarZoom + chromeWidth;
+            double tbWinH = rdp_height * taskbarZoom + chromeHeight;
+            int tbWidthUsage = (int)Math.Round(tbWinW / monitorResolution.Width * 100);
+            int tbWidthUsageTwo = (int)Math.Round(2 * tbWinW / monitorResolution.Width * 100);
+            int tbHeightUsage = (int)Math.Round(tbWinH / monitorResolution.Height * 100);
+            int tbAreaOne = Math.Min(tbWidthUsage, 100) * tbHeightUsage;
+            int tbAreaTwo = Math.Min(tbWidthUsageTwo, 100) * tbHeightUsage;
+            computedTaskbar.Add(new MonitorResolution
+            {
+                Width = monitorResolution.Width,
+                Height = monitorResolution.Height,
+                ZoomFactor = taskbarZoom,
+                WidthUsage = tbWidthUsage,
+                WidthUsageTwo = tbWidthUsageTwo,
+                HeightUsage = tbHeightUsage,
+                AreaOnePercent = (int)Math.Round(tbAreaOne / 100.0),
+                AreaTwoPercent = (int)Math.Round(tbAreaTwo / 100.0),
+                IsCurrent = (monitorResolution.Width == currentWidth && monitorResolution.Height == currentHeight)
+            });
+
+        }
+
         return new DisplayResult
         {
             MonitorNumber = monitorNumber,
@@ -541,7 +599,8 @@ public class MonitorResolutions
             ChromeHeight = chromeHeight,
             RdpWidth = rdp_width,
             RdpHeight = rdp_height,
-            Computed = computed
+            Computed = computed,
+            ComputedTaskbar = computedTaskbar
         };
     }
 }
@@ -562,7 +621,7 @@ if (-not ($typeName -as [type])) {
 
 $type = $typeName -as [type]
 if ($null -eq $type) { Write-Host "ERROR: Failed to load P/Invoke type '$typeName'."; exit 1 }
-$result = $type::GetMonitorData($rdpWidth, $rdpHeight, $MaxZoom, $ChromeWidthAt96Dpi, $ChromeHeightAt96Dpi, $RatioTolerance)
+$result = $type::GetMonitorData($rdpWidth, $rdpHeight, $MaxZoom, $ChromeWidthAt96Dpi, $ChromeHeightAt96Dpi, $RatioTolerance, $TaskbarHeightAt96Dpi)
 if ($result.Error) {
     Write-Host $result.Error
     exit 1
@@ -587,16 +646,26 @@ for ($zoom = 1; $zoom -le $MaxZoom; $zoom++) {
     $x0 = [Math]::Max(0, $x1 - $winW)
     Write-Host "$rdpLabel $($zoom * 100)% rdp zoom: winposstr:s:0,1,0,0,$winW,$winH  2nd: winposstr:s:0,1,$x0,0,$x1,$winH"
 }
+$taskbarHeight = $TaskbarHeightAt96Dpi * $result.DpiScale
+$taskbarZoom = ($result.CurrentHeight - $result.ChromeHeight - $taskbarHeight) / $rdpHeight
+if ($taskbarZoom -ge 1.0) {
+    $taskbarZoomPct = [int][Math]::Round($taskbarZoom * 100)
+    $winW = [int][Math]::Ceiling($rdpWidth * $taskbarZoom + $result.ChromeWidth)
+    $winH = [int][Math]::Ceiling($rdpHeight * $taskbarZoom + $result.ChromeHeight)
+    $x1 = $result.CurrentWidth - 1
+    $x0 = [Math]::Max(0, $x1 - $winW)
+    Write-Host "$rdpLabel ${taskbarZoomPct}% taskbar zoom: winposstr:s:0,1,0,0,$winW,$winH  2nd: winposstr:s:0,1,$x0,0,$x1,$winH"
+}
 
 $interactive = $rdpPaths.Count -gt 0
 $monitorResolutions = @()
 $optionNumber = 1
 
 # Display 1-window and 2-window options sorted by area
-$oneWindowSorted = @($result.Computed | Sort-Object -Property AreaOnePercent -Descending)
+$oneWindowSorted = @(@($result.Computed) + @($result.ComputedTaskbar) | Sort-Object -Property AreaOnePercent -Descending)
 Write-ResolutionOptions -Sorted $oneWindowSorted -WindowCount 1 -RdpLabel $rdpLabel -Interactive $interactive -OptionNumber ([ref]$optionNumber) -MonitorResolutions ([ref]$monitorResolutions)
 
-$twoWindowSorted = @($result.Computed | Sort-Object -Property AreaTwoPercent -Descending)
+$twoWindowSorted = @(@($result.Computed) + @($result.ComputedTaskbar) | Sort-Object -Property AreaTwoPercent -Descending)
 Write-ResolutionOptions -Sorted $twoWindowSorted -WindowCount 2 -RdpLabel $rdpLabel -Interactive $interactive -OptionNumber ([ref]$optionNumber) -MonitorResolutions ([ref]$monitorResolutions)
 
 if (-not $interactive) {
@@ -647,7 +716,7 @@ if (-not (Test-Path $targetPath)) {
 $lines = @(Get-Content $targetPath -Encoding Unicode)
 
 $requiredSettings = @(
-    @{ Key = 'smart sizing'; Value = 'smart sizing:i:0' }
+    @{ Key = 'smart sizing'; Value = "smart sizing:i:$(if ([Environment]::OSVersion.Version.Build -ge 22000) { 1 } else { 0 })" }
     @{ Key = 'allow font smoothing'; Value = 'allow font smoothing:i:1' }
     @{ Key = 'desktopwidth'; Value = "desktopwidth:i:${rdpWidth}" }
     @{ Key = 'desktopheight'; Value = "desktopheight:i:${rdpHeight}" }
