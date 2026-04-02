@@ -1,8 +1,8 @@
 # Resolution Suggester
 
-Analyzes available monitor resolutions on the current monitor and recommends settings for running 1 or 2 RDP windows at a given base resolution (default 800x600) with zoom levels up to 2x, plus a taskbar-fit zoom that maximizes the window while leaving space for the Windows taskbar.
+Analyzes available monitor resolutions on the current monitor and recommends settings for running 1 or 2 RDP windows at a given base RDP resolution (default 800x600) with integer zoom up to 200%, plus a taskbar-fit zoom that maximizes the window while leaving space for the Windows taskbar.
 
-An RDP session at a given RDP resolution does not fit in exactly that many pixels on screen. The window's title bar and borders add pixels in both dimensions, so the actual footprint is larger (e.g., 800x600 becomes 814x637 at 100% DPI). These decorations scale proportionally with the monitor's DPI setting — at 200% DPI the borders are twice as large in pixels — so the program factors in the current DPI when calculating window sizes.
+An RDP session at a given RDP resolution does not fit in exactly that many pixels on screen. The window chrome (title bar and borders) adds pixels in both dimensions, so the actual footprint is larger (e.g., 800x600 becomes 814x637 at 100% DPI). Chrome scales proportionally with the monitor's DPI setting — at 200% DPI the chrome is twice as large in pixels — so the program factors in the current DPI when calculating window sizes.
 
 ## What It Does
 
@@ -111,8 +111,10 @@ The program:
 1. Calls `SetProcessDpiAwareness` with `PROCESS_PER_MONITOR_DPI_AWARE` to enable per-monitor DPI awareness
 2. Identifies the current monitor using `GetConsoleWindow` and `MonitorFromWindow` with `MONITOR_DEFAULTTONEAREST`
 3. Reads current display settings and DPI via `EnumDisplaySettings` and `GetDpiForMonitor`
-4. Enumerates all display modes for that monitor, filtering to same aspect ratio (ratio difference < 0.001), same refresh rate, and minimum height to fit at least one RDP session plus window borders and title bar
-5. Computes the maximum integer zoom factor each monitor resolution supports (largest N where N \* base height + decoration height <= monitor resolution height, capped at the maximum zoom level, currently 2)
+4. Enumerates all display modes for that monitor, filtering to same aspect ratio (ratio difference < 0.001), same refresh rate, and minimum height to fit at least one RDP session plus window chrome
+5. Computes the maximum integer zoom factor each monitor resolution supports (largest N where N * RDP height + chrome height <= monitor resolution height, capped at MaxZoom, currently 2)
 6. Computes a taskbar-fit zoom for each monitor resolution: the fractional zoom where `base height * zoom + decoration height + 48 * DPI scale = monitor height`, leaving exactly 48 DPI-scaled pixels for the Windows taskbar
 7. Calculates area usage percentages and ranks results
 
+## TODO ###
+At PTF we noticed that RDP respects smartsizing and allows stretching. Quality needs to be tested because it will invalidate the need to use this.
