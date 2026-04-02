@@ -37,7 +37,8 @@ static class Assertions
         {
             results.Add(AssertExitCode(result, 0));
             // Help text verified against PS1 output
-            results.Add(AssertContains(result.Stdout, "[-r WxH|W|WxN:D] [paths...]", "help text"));
+            results.Add(AssertContains(result.Stdout, "[-r WxH|W|WxN:D] [--show-all-modes] [paths...]", "help text"));
+            results.Add(AssertContains(result.Stdout, "--show-all-modes", "help switch"));
             return results;
         }
         if (row.ResolutionArg == "invalid_format")
@@ -102,6 +103,7 @@ static class Assertions
             string expectedDpi = (mon.Dpi / 96.0 * 100).ToString("F0");
             string expectedHeader = $"Current Monitor #0, {mon.Width}x{mon.Height}, Ratio: 16:9, Frequency: {mon.Frequency}Hz, DPI Scale {expectedDpi}%";
             results.Add(AssertContains(result.Stdout, expectedHeader, "synthetic header"));
+            results.AddRange(AssertModeFilterSummary(row, result.Stdout, mon, realMonitor));
 
             // Noise modes must not appear in monitor resolution output
             // Skip when picker is active (picker menu lists common resolutions that match noise dimensions)
@@ -154,6 +156,78 @@ static class Assertions
             results.AddRange(AssertRdpFile(row, tempDir, rdpW, rdpH));
         }
 
+        return results;
+    }
+
+    static List<AssertResult> AssertModeFilterSummary(
+        TestCase.PictRow row,
+        string stdout,
+        SyntheticMonitor.MonitorDef mon,
+        MonitorOracle.MonitorData? realMonitor)
+    {
+        var results = new List<AssertResult>();
+
+        int rdpH = GetExpectedRdpHeight(row, realMonitor, mon);
+        double dpiScale = mon.Dpi / 96.0;
+        double chromeH = ChromeHeight96Dpi * dpiScale;
+        int minimumHeight = (int)Math.Ceiling(rdpH + chromeH);
+
+        var seen = new Dictionary<string, (bool RatioMatches, bool HasCurrentFrequency)>();
+        double monitorRatio = (double)mon.Width / mon.Height;
+
+        foreach (string modeStr in mon.TestModesArg.Split(','))
+        {
+            var match = Regex.Match(modeStr, @"^(\d+)x(\d+)(?:@(\d+)Hz)?$");
+            if (!match.Success)
+                continue;
+
+            int modeW = int.Parse(match.Groups[1].Value);
+            int modeH = int.Parse(match.Groups[2].Value);
+            int modeFreq = match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : mon.Frequency;
+            if (modeH < minimumHeight || modeH <= 0)
+                continue;
+
+            string key = $"{modeW}x{modeH}";
+            bool ratioMatches = Math.Abs((double)modeW / modeH - monitorRatio) < RatioTolerance;
+            if (!seen.TryGetValue(key, out var state))
+                state = (ratioMatches, false);
+            state.HasCurrentFrequency |= modeFreq == mon.Frequency;
+            seen[key] = state;
+        }
+
+        int excludedByRatio = 0;
+        int excludedByRefresh = 0;
+        int excludedByBoth = 0;
+        foreach (var state in seen.Values)
+        {
+            if (state.RatioMatches && state.HasCurrentFrequency)
+                continue;
+            if (state.RatioMatches)
+                excludedByRefresh++;
+            else if (state.HasCurrentFrequency)
+                excludedByRatio++;
+            else
+                excludedByBoth++;
+        }
+
+        int totalExcluded = excludedByRatio + excludedByRefresh + excludedByBoth;
+        if (totalExcluded == 0)
+        {
+            results.Add(AssertNotContains(stdout, "Run with --show-all-modes to include them.", "no filter summary expected"));
+            return results;
+        }
+
+        var parts = new List<string>();
+        if (excludedByRatio > 0)
+            parts.Add($"{excludedByRatio} ratio mismatch");
+        if (excludedByRefresh > 0)
+            parts.Add($"{excludedByRefresh} refresh mismatch");
+        if (excludedByBoth > 0)
+            parts.Add($"{excludedByBoth} both");
+
+        string modeLabel = totalExcluded == 1 ? "mode" : "modes";
+        string expectedSummary = $"Also found {totalExcluded} other usable monitor {modeLabel} on this monitor ({string.Join(", ", parts)}). Run with --show-all-modes to include them.";
+        results.Add(AssertContains(stdout, expectedSummary, "filter summary"));
         return results;
     }
 

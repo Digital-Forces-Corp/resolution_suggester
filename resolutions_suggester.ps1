@@ -28,8 +28,68 @@ function Read-MenuChoice([string]$Prompt, [int]$Min, [int]$Max) {
 
 function Get-Gcd([int]$a, [int]$b) { while ($b -ne 0) { $t = $b; $b = $a % $b; $a = $t } return $a }
 
-function Write-ResolutionOptions([array]$Sorted, [int]$WindowCount, [string]$RdpLabel, [bool]$Interactive, [ref]$OptionNumber, [ref]$MonitorResolutions) {
-    Write-Host "`n--- Available monitor resolutions for $WindowCount $RdpLabel with same ratio and frequency sorted by area used ---"
+function Get-UsableModeCatalog([array]$Modes, [int]$TargetFrequency, [int]$MinimumHeight, [double]$TargetRatio, [double]$RatioToleranceParam, [bool]$ShowAllModes) {
+    $catalog = @{}
+    foreach ($modeEntry in $Modes) {
+        $modeW = $modeEntry.Width
+        $modeH = $modeEntry.Height
+        $modeFreq = $modeEntry.Frequency
+
+        if ($modeH -lt $MinimumHeight -or $modeH -le 0) {
+            continue
+        }
+
+        $ratio = [double]$modeW / $modeH
+        $ratioMatches = [Math]::Abs($ratio - $TargetRatio) -lt $RatioToleranceParam
+        $key = "${modeW}x${modeH}"
+
+        if (-not $catalog.ContainsKey($key)) {
+            $catalog[$key] = [ordered]@{
+                Width = $modeW
+                Height = $modeH
+                RatioMatches = $ratioMatches
+                HasTargetFrequency = $false
+            }
+        }
+
+        if ($modeFreq -eq $TargetFrequency) {
+            $catalog[$key].HasTargetFrequency = $true
+        }
+    }
+
+    $included = @()
+    $excludedByRatioCount = 0
+    $excludedByRefreshCount = 0
+    $excludedByBothCount = 0
+
+    foreach ($candidate in ($catalog.Values | Sort-Object Width, Height)) {
+        if ($ShowAllModes -or ($candidate.RatioMatches -and $candidate.HasTargetFrequency)) {
+            $included += @{ Width = $candidate.Width; Height = $candidate.Height }
+            continue
+        }
+
+        if ($candidate.RatioMatches) {
+            $excludedByRefreshCount++
+        }
+        elseif ($candidate.HasTargetFrequency) {
+            $excludedByRatioCount++
+        }
+        else {
+            $excludedByBothCount++
+        }
+    }
+
+    return [PSCustomObject]@{
+        Included = $included
+        ExcludedByRatioCount = $excludedByRatioCount
+        ExcludedByRefreshCount = $excludedByRefreshCount
+        ExcludedByBothCount = $excludedByBothCount
+        OtherUsableModeCount = $excludedByRatioCount + $excludedByRefreshCount + $excludedByBothCount
+    }
+}
+
+function Write-ResolutionOptions([array]$Sorted, [int]$WindowCount, [string]$RdpLabel, [string]$FilterDescription, [bool]$Interactive, [ref]$OptionNumber, [ref]$MonitorResolutions) {
+    Write-Host "`n--- Available monitor resolutions for $WindowCount $RdpLabel $FilterDescription sorted by area used ---"
     foreach ($res in $Sorted) {
         $marker = if ($res.IsCurrent) { "*" } else { " " }
         $prefix = if ($Interactive) { "  $($OptionNumber.Value). " } else { "" }
@@ -44,32 +104,32 @@ function Write-ResolutionOptions([array]$Sorted, [int]$WindowCount, [string]$Rdp
     }
 }
 
-function Get-FilteredModes([array]$Modes, [int]$TargetFrequency, [int]$MinimumHeight, [double]$TargetRatio, [double]$RatioToleranceParam) {
-    $seen = @{}
-    $filtered = @()
-    foreach ($modeEntry in $Modes) {
-        $modeW = $modeEntry.Width
-        $modeH = $modeEntry.Height
-        $modeFreq = $modeEntry.Frequency
-
-        if ($modeFreq -eq $TargetFrequency -and $modeH -ge $MinimumHeight -and $modeH -gt 0) {
-            $ratio = [double]$modeW / $modeH
-            if ([Math]::Abs($ratio - $TargetRatio) -lt $RatioToleranceParam) {
-                $key = "${modeW}x${modeH}"
-                if (-not $seen.ContainsKey($key)) {
-                    $seen[$key] = $true
-                    $filtered += @{ Width = $modeW; Height = $modeH }
-                }
-            }
-        }
+function Write-ModeFilterSummary($Result) {
+    if ($Result.ShowAllModes -or $Result.OtherUsableModeCount -le 0) {
+        return
     }
-    return ,$filtered
+
+    $parts = @()
+    if ($Result.ExcludedByRatioCount -gt 0) {
+        $parts += "$($Result.ExcludedByRatioCount) ratio mismatch"
+    }
+    if ($Result.ExcludedByRefreshCount -gt 0) {
+        $parts += "$($Result.ExcludedByRefreshCount) refresh mismatch"
+    }
+    if ($Result.ExcludedByBothCount -gt 0) {
+        $parts += "$($Result.ExcludedByBothCount) both"
+    }
+
+    $modeLabel = if ($Result.OtherUsableModeCount -eq 1) { "mode" } else { "modes" }
+    $breakdown = $parts -join ", "
+    Write-Host "Also found $($Result.OtherUsableModeCount) other usable monitor $modeLabel on this monitor ($breakdown). Run with --show-all-modes to include them."
 }
 
-# Parse arguments: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [--help] [paths...]
+# Parse arguments: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [--show-all-modes] [--help] [paths...]
 $rdpWidth = 800
 $rdpHeight = 600
 $pathArgs = @()
+$showAllModes = $false
 $testMonitor = $null
 $testModes = $null
 $argIndex = 0
@@ -77,13 +137,14 @@ $argIndex = 0
 while ($argIndex -lt $InputArgs.Count) {
     $arg = $InputArgs[$argIndex]
     if ($arg -eq '--help' -or $arg -eq '-h') {
-        Write-Host "Usage: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [paths...]"
+        Write-Host "Usage: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [--show-all-modes] [paths...]"
         Write-Host ""
         Write-Host "Options:"
         Write-Host "  --rdp-resolution, -r  RDP resolution (default: 800x600)"
         Write-Host "                    WxH       explicit (e.g. 800x600, 1280x1024)"
         Write-Host "                    W         width-only, height from monitor aspect ratio (e.g. 1280)"
         Write-Host "                    WxN:D     width with aspect ratio (e.g. 1280x4:3)"
+        Write-Host "  --show-all-modes   Include usable modes even when ratio or refresh rate differs"
         Write-Host "  --help, -h            Show this help"
         Write-Host ""
         Write-Host "Arguments:"
@@ -182,6 +243,9 @@ while ($argIndex -lt $InputArgs.Count) {
             exit 1
         }
     }
+    elseif ($arg -eq '--show-all-modes') {
+        $showAllModes = $true
+    }
     elseif ($arg -eq '--test-monitor' -and $argIndex + 1 -lt $InputArgs.Count) {
         $argIndex++
         $testMonitor = $InputArgs[$argIndex]
@@ -259,7 +323,8 @@ if ($testMonitor) {
     }
 
     $minimumHeight = [int][Math]::Ceiling($rdpHeight + $chromeHeight)
-    $modes = Get-FilteredModes -Modes $parsedModes -TargetFrequency $currentFrequency -MinimumHeight $minimumHeight -TargetRatio $currentRatio -RatioToleranceParam $RatioTolerance
+    $modeCatalog = Get-UsableModeCatalog -Modes $parsedModes -TargetFrequency $currentFrequency -MinimumHeight $minimumHeight -TargetRatio $currentRatio -RatioToleranceParam $RatioTolerance -ShowAllModes $showAllModes
+    $modes = $modeCatalog.Included
 
     # Compute monitor resolution options for each mode
     # NOTE: This zoom/area computation duplicates the embedded C# real-monitor path.
@@ -326,6 +391,11 @@ if ($testMonitor) {
         ChromeHeight = $chromeHeight
         RdpWidth = $rdpWidth
         RdpHeight = $rdpHeight
+        ShowAllModes = $showAllModes
+        ExcludedByRatioCount = $modeCatalog.ExcludedByRatioCount
+        ExcludedByRefreshCount = $modeCatalog.ExcludedByRefreshCount
+        ExcludedByBothCount = $modeCatalog.ExcludedByBothCount
+        OtherUsableModeCount = $modeCatalog.OtherUsableModeCount
         Computed = $computed
         ComputedTaskbar = $computedTaskbar
     }
@@ -389,6 +459,14 @@ public class MonitorResolutions
         public bool IsCurrent;
     }
 
+    public class ResolutionCandidate
+    {
+        public int Width;
+        public int Height;
+        public bool RatioMatches;
+        public bool HasCurrentFrequency;
+    }
+
     public class DisplayResult
     {
         public string MonitorNumber;
@@ -402,6 +480,11 @@ public class MonitorResolutions
         public double ChromeHeight;
         public int RdpWidth;
         public int RdpHeight;
+        public bool ShowAllModes;
+        public int ExcludedByRatioCount;
+        public int ExcludedByRefreshCount;
+        public int ExcludedByBothCount;
+        public int OtherUsableModeCount;
         public List<MonitorResolution> Computed;
         public List<MonitorResolution> ComputedTaskbar;
         public string Error;
@@ -447,15 +530,15 @@ public class MonitorResolutions
 
     static int Gcd(int a, int b) { while (b != 0) { int t = b; b = a % b; a = t; } return a; }
 
-    public static DisplayResult GetMonitorData(int rdp_width, int rdp_height, int max_zoom, double chrome_width_96dpi, double chrome_height_96dpi, double ratio_tolerance, double taskbar_height_96dpi)
+    public static DisplayResult GetMonitorData(int rdp_width, int rdp_height, int max_zoom, double chrome_width_96dpi, double chrome_height_96dpi, double ratio_tolerance, double taskbar_height_96dpi, bool show_all_modes)
     {
         DEVMODE devMode = new DEVMODE();
         devMode.dmSize = (short)Marshal.SizeOf<DEVMODE>();
         DEVMODE currentSettings = new DEVMODE();
         currentSettings.dmSize = (short)Marshal.SizeOf<DEVMODE>();
         int modeIndex = 0;
-        HashSet<string> addedMonitorResolutions = new HashSet<string>();
         List<MonitorResolution> monitorResolutions = new List<MonitorResolution>();
+        Dictionary<string, ResolutionCandidate> resolutionCatalog = new Dictionary<string, ResolutionCandidate>();
         const int ENUM_CURRENT_SETTINGS = -1;
 
         int dpiAwarenessResult = SetProcessDpiAwareness(2); // PROCESS_PER_MONITOR_DPI_AWARE
@@ -509,24 +592,60 @@ public class MonitorResolutions
 
         while (EnumDisplaySettings(deviceName, modeIndex, ref devMode))
         {
-            if ((int)devMode.dmDisplayFrequency == currentFrequency && (int)devMode.dmPelsHeight >= minimum_height && devMode.dmPelsHeight > 0)
+            if ((int)devMode.dmPelsHeight >= minimum_height && devMode.dmPelsHeight > 0)
             {
                 double ratio = (double)devMode.dmPelsWidth / devMode.dmPelsHeight;
+                bool ratioMatches = Math.Abs(ratio - currentRatio) < ratio_tolerance;
+                string monitorResolutionKey = devMode.dmPelsWidth + "x" + devMode.dmPelsHeight;
 
-                if (Math.Abs(ratio - currentRatio) < ratio_tolerance)
+                ResolutionCandidate candidate;
+                if (!resolutionCatalog.TryGetValue(monitorResolutionKey, out candidate))
                 {
-                    string monitorResolutionKey = devMode.dmPelsWidth + "x" + devMode.dmPelsHeight;
-                    if (addedMonitorResolutions.Add(monitorResolutionKey))
+                    candidate = new ResolutionCandidate
                     {
-                        monitorResolutions.Add(new MonitorResolution
-                        {
-                            Width = (int)devMode.dmPelsWidth,
-                            Height = (int)devMode.dmPelsHeight
-                        });
-                    }
+                        Width = (int)devMode.dmPelsWidth,
+                        Height = (int)devMode.dmPelsHeight,
+                        RatioMatches = ratioMatches,
+                        HasCurrentFrequency = false
+                    };
+                    resolutionCatalog.Add(monitorResolutionKey, candidate);
+                }
+
+                if ((int)devMode.dmDisplayFrequency == currentFrequency)
+                {
+                    candidate.HasCurrentFrequency = true;
                 }
             }
             modeIndex++;
+        }
+
+        int excludedByRatioCount = 0;
+        int excludedByRefreshCount = 0;
+        int excludedByBothCount = 0;
+        foreach (var candidate in resolutionCatalog.Values.OrderBy(c => c.Width).ThenBy(c => c.Height))
+        {
+            if (show_all_modes || (candidate.RatioMatches && candidate.HasCurrentFrequency))
+            {
+                monitorResolutions.Add(new MonitorResolution
+                {
+                    Width = candidate.Width,
+                    Height = candidate.Height
+                });
+                continue;
+            }
+
+            if (candidate.RatioMatches)
+            {
+                excludedByRefreshCount++;
+            }
+            else if (candidate.HasCurrentFrequency)
+            {
+                excludedByRatioCount++;
+            }
+            else
+            {
+                excludedByBothCount++;
+            }
         }
 
         // max_zoom passed as parameter from $MaxZoom
@@ -599,6 +718,11 @@ public class MonitorResolutions
             ChromeHeight = chromeHeight,
             RdpWidth = rdp_width,
             RdpHeight = rdp_height,
+            ShowAllModes = show_all_modes,
+            ExcludedByRatioCount = excludedByRatioCount,
+            ExcludedByRefreshCount = excludedByRefreshCount,
+            ExcludedByBothCount = excludedByBothCount,
+            OtherUsableModeCount = excludedByRatioCount + excludedByRefreshCount + excludedByBothCount,
             Computed = computed,
             ComputedTaskbar = computedTaskbar
         };
@@ -621,7 +745,7 @@ if (-not ($typeName -as [type])) {
 
 $type = $typeName -as [type]
 if ($null -eq $type) { Write-Host "ERROR: Failed to load P/Invoke type '$typeName'."; exit 1 }
-$result = $type::GetMonitorData($rdpWidth, $rdpHeight, $MaxZoom, $ChromeWidthAt96Dpi, $ChromeHeightAt96Dpi, $RatioTolerance, $TaskbarHeightAt96Dpi)
+$result = $type::GetMonitorData($rdpWidth, $rdpHeight, $MaxZoom, $ChromeWidthAt96Dpi, $ChromeHeightAt96Dpi, $RatioTolerance, $TaskbarHeightAt96Dpi, $showAllModes)
 if ($result.Error) {
     Write-Host $result.Error
     exit 1
@@ -656,17 +780,19 @@ if ($taskbarZoom -ge 1.0) {
     $x0 = [Math]::Max(0, $x1 - $winW)
     Write-Host "$rdpLabel ${taskbarZoomPct}% taskbar zoom: winposstr:s:0,1,0,0,$winW,$winH  2nd: winposstr:s:0,1,$x0,0,$x1,$winH"
 }
+Write-ModeFilterSummary -Result $result
 
 $interactive = $rdpPaths.Count -gt 0
 $monitorResolutions = @()
 $optionNumber = 1
+$filterDescription = if ($result.ShowAllModes) { "including all usable modes" } else { "with same ratio and frequency" }
 
 # Display 1-window and 2-window options sorted by area
 $oneWindowSorted = @(@($result.Computed) + @($result.ComputedTaskbar) | Sort-Object -Property AreaOnePercent -Descending)
-Write-ResolutionOptions -Sorted $oneWindowSorted -WindowCount 1 -RdpLabel $rdpLabel -Interactive $interactive -OptionNumber ([ref]$optionNumber) -MonitorResolutions ([ref]$monitorResolutions)
+Write-ResolutionOptions -Sorted $oneWindowSorted -WindowCount 1 -RdpLabel $rdpLabel -FilterDescription $filterDescription -Interactive $interactive -OptionNumber ([ref]$optionNumber) -MonitorResolutions ([ref]$monitorResolutions)
 
 $twoWindowSorted = @(@($result.Computed) + @($result.ComputedTaskbar) | Sort-Object -Property AreaTwoPercent -Descending)
-Write-ResolutionOptions -Sorted $twoWindowSorted -WindowCount 2 -RdpLabel $rdpLabel -Interactive $interactive -OptionNumber ([ref]$optionNumber) -MonitorResolutions ([ref]$monitorResolutions)
+Write-ResolutionOptions -Sorted $twoWindowSorted -WindowCount 2 -RdpLabel $rdpLabel -FilterDescription $filterDescription -Interactive $interactive -OptionNumber ([ref]$optionNumber) -MonitorResolutions ([ref]$monitorResolutions)
 
 if (-not $interactive) {
     return

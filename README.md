@@ -7,7 +7,7 @@ An RDP session at a given RDP resolution does not fit in exactly that many pixel
 ## What It Does
 
 1. Detects the monitor where the console is running (DPI and multi-monitor aware)
-2. Enumerates all available monitor resolutions matching the current aspect ratio and refresh rate
+2. Enumerates all available monitor resolutions matching the current aspect ratio and refresh rate, and reports when other usable monitor modes exist
 3. Calculates how much screen area an RDP window uses at each monitor resolution for integer zoom levels (100%, 200%) and a taskbar-fit zoom that leaves 48 DPI-scaled pixels for the taskbar
 4. Ranks monitor resolutions by area efficiency for single-window and dual-window layouts
 5. Outputs ready-to-use `winposstr` values for `.rdp` files to position windows at each zoom level
@@ -48,6 +48,7 @@ The C# executable and winget distribution have been abandoned [csharp-winget-exp
 ```
 resolution_suggester -h                 # show help
 resolution_suggester                    # default 800x600
+resolution_suggester --show-all-modes   # include usable modes with different ratio or refresh rate
 resolution_suggester -r 1280x1024       # 1280x1024
 resolution_suggester -r 1280            # width-only, height from monitor aspect ratio
 resolution_suggester -r 1280x4:3        # width with explicit 4:3 aspect ratio
@@ -55,7 +56,7 @@ resolution_suggester c:\dfc\rdp\server.rdp         # interactive: choose monitor
 resolution_suggester C:\dfc\rdp\        # interactive: choose monitor resolution, L/R position, and .rdp file
 ```
 
-`--rdp-resolution` / `-r` accepts three formats: `WxH` (explicit width and height), `W` (width-only, height derived from monitor aspect ratio), and `WxN:D` (width with explicit aspect ratio). Default is `800x600`. `-r` with no argument opens an interactive picker to select from common RDP resolutions. The PowerShell script uses `-r` the same way.
+`--rdp-resolution` / `-r` accepts three formats: `WxH` (explicit width and height), `W` (width-only, height derived from monitor aspect ratio), and `WxN:D` (width with explicit aspect ratio). Default is `800x600`. `-r` with no argument opens an interactive picker to select from common RDP resolutions. `--show-all-modes` includes usable monitor modes even when their aspect ratio or refresh rate differs from the current mode. The PowerShell script uses `-r` the same way.
 
 When `.rdp` file paths or directories are passed, the program enters interactive mode. It numbers each monitor resolution in the output, then prompts to choose a monitor resolution, an `.rdp` file (if multiple), and left/right window position. The selected `winposstr`, RDP resolution, and display settings are written directly into the `.rdp` file.
 
@@ -66,6 +67,7 @@ Current Monitor #1, 2560x1440, Ratio: 16:9, Frequency: 60Hz, DPI Scale 100%
 RDP 800x600 100% rdp zoom: winposstr:s:0,1,0,0,814,637  2nd: winposstr:s:0,1,1745,0,2559,637
 RDP 800x600 200% rdp zoom: winposstr:s:0,1,0,0,1614,1237  2nd: winposstr:s:0,1,945,0,2559,1237
 RDP 800x600 226% taskbar zoom: winposstr:s:0,1,0,0,1822,1392  2nd: winposstr:s:0,1,737,0,2559,1392
+Also found 2 other usable monitor modes on this monitor (1 ratio mismatch, 1 refresh mismatch). Run with --show-all-modes to include them.
 
 --- Available monitor resolutions for 1 RDP 800x600 with same ratio and frequency sorted by area used ---
 *2560x1440, 69% area (71% width, 97% height), 226% taskbar zoom
@@ -82,6 +84,7 @@ RDP 800x600 226% taskbar zoom: winposstr:s:0,1,0,0,1822,1392  2nd: winposstr:s:0
 
 - Header line: monitor number, current monitor resolution, aspect ratio, refresh rate, DPI scale
 - `winposstr` lines: ready-to-use values for positioning the 1st and 2nd RDP windows at each zoom level (100%, 200%, and taskbar-fit)
+- Summary line: indicates when additional usable monitor modes were excluded by the default ratio and refresh-rate filters, and points to `--show-all-modes`
 - Ranked lists: available monitor resolutions sorted by how efficiently they fill the screen for 1 or 2 RDP windows; numbered in interactive mode; includes both integer zoom (100%/200%) and taskbar zoom entries
 - `*` marks the current monitor resolution
 - Percentage values: `width` = horizontal space used, `height` = vertical space used, `area` = combined fill
@@ -89,10 +92,10 @@ RDP 800x600 226% taskbar zoom: winposstr:s:0,1,0,0,1822,1392  2nd: winposstr:s:0
 
 ### Applying winposstr Values
 
-To apply manually (interactive mode writes these automatically), add these lines to an `.rdp` file:
+To apply manually (interactive mode writes these automatically), add these lines to an `.rdp` file and set `smart sizing` to `i:1` on Windows 11 or `i:0` on Windows 10:
 
 ```
-smart sizing:i:0
+smart sizing:i:<0_or_1>
 allow font smoothing:i:1
 desktopwidth:i:800
 desktopheight:i:600
@@ -111,7 +114,7 @@ The program:
 1. Calls `SetProcessDpiAwareness` with `PROCESS_PER_MONITOR_DPI_AWARE` to enable per-monitor DPI awareness
 2. Identifies the current monitor using `GetConsoleWindow` and `MonitorFromWindow` with `MONITOR_DEFAULTTONEAREST`
 3. Reads current display settings and DPI via `EnumDisplaySettings` and `GetDpiForMonitor`
-4. Enumerates all display modes for that monitor, filtering to same aspect ratio (ratio difference < 0.001), same refresh rate, and minimum height to fit at least one RDP session plus window chrome
+4. Enumerates all display modes for that monitor, filtering by default to same aspect ratio (ratio difference < 0.001), same refresh rate, and minimum height to fit at least one RDP session plus window chrome; `--show-all-modes` drops the ratio and refresh-rate filters while still requiring a usable height
 5. Computes the maximum integer zoom factor each monitor resolution supports (largest N where N * RDP height + chrome height <= monitor resolution height, capped at MaxZoom, currently 2)
 6. Computes a taskbar-fit zoom for each monitor resolution: the fractional zoom where `base height * zoom + decoration height + 48 * DPI scale = monitor height`, leaving exactly 48 DPI-scaled pixels for the Windows taskbar
 7. Calculates area usage percentages and ranks results
