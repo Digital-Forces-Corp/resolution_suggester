@@ -37,7 +37,20 @@ Alternate path if PowerShell is unavailable:
 curl.exe -LO --output-dir c:\dfc\scripts https://raw.githubusercontent.com/Digital-Forces-Corp/resolution_suggester/main/resolutions_suggester.ps1
 ```
 
-The C# executable and winget distribution worked but has been abandoned [csharp-winget-experiment.md](csharp-winget-experiment.md) to to be replaced by deploying an installer that drops the ps1 so users can debug with ai.
+## Simplifying Distribution
+
+The earlier C# executable and winget packaging experiment worked, but this project now ships as a single PowerShell script instead. See [csharp-winget-experiment.md](csharp-winget-experiment.md) for the abandoned approach.
+
+Reasons for the change:
+
+- Keeping both the PowerShell and C# implementations in sync created substantial development overhead.
+- Shipping PowerShell makes the tool easier for users to inspect, debug, and adapt with AI assistance.
+
+Possible alternatives in the future:
+
+- Ship the C# source as a .NET 10 file-based app that runs directly with `dotnet run <file>.cs`.
+- Provide an installer that writes out the PowerShell script.
+
 
 ## Requirements
 
