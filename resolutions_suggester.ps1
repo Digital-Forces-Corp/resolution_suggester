@@ -28,7 +28,7 @@ function Read-MenuChoice([string]$Prompt, [int]$Min, [int]$Max) {
 
 function Get-Gcd([int]$a, [int]$b) { while ($b -ne 0) { $t = $b; $b = $a % $b; $a = $t } return $a }
 
-function Get-UsableModeCatalog([array]$Modes, [int]$TargetFrequency, [int]$MinimumHeight, [double]$TargetRatio, [double]$RatioToleranceParam, [bool]$ShowAllModes) {
+function Get-UsableModeCatalog([array]$Modes, [int]$TargetFrequency, [int]$MinimumHeight, [double]$TargetRatio, [double]$RatioToleranceParam, [bool]$IncludeMismatchModes) {
     $catalog = @{}
     foreach ($modeEntry in $Modes) {
         $modeW = $modeEntry.Width
@@ -63,7 +63,7 @@ function Get-UsableModeCatalog([array]$Modes, [int]$TargetFrequency, [int]$Minim
     $excludedByBothCount = 0
 
     foreach ($candidate in ($catalog.Values | Sort-Object Width, Height)) {
-        if ($ShowAllModes -or ($candidate.RatioMatches -and $candidate.HasTargetFrequency)) {
+        if ($IncludeMismatchModes -or ($candidate.RatioMatches -and $candidate.HasTargetFrequency)) {
             $included += @{ Width = $candidate.Width; Height = $candidate.Height }
             continue
         }
@@ -105,7 +105,7 @@ function Write-ResolutionOptions([array]$Sorted, [int]$WindowCount, [string]$Rdp
 }
 
 function Write-ModeFilterSummary($Result) {
-    if ($Result.ShowAllModes -or $Result.OtherUsableModeCount -le 0) {
+    if ($Result.IncludeMismatchModes -or $Result.OtherUsableModeCount -le 0) {
         return
     }
 
@@ -122,14 +122,14 @@ function Write-ModeFilterSummary($Result) {
 
     $modeLabel = if ($Result.OtherUsableModeCount -eq 1) { "mode" } else { "modes" }
     $breakdown = $parts -join ", "
-    Write-Host "Also found $($Result.OtherUsableModeCount) other usable monitor $modeLabel on this monitor ($breakdown). Run with --show-all-modes to include them."
+    Write-Host "Also found $($Result.OtherUsableModeCount) other usable monitor $modeLabel on this monitor ($breakdown). Run with --include-mismatch-modes / -m to include them."
 }
 
-# Parse arguments: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [--show-all-modes] [--help] [paths...]
+# Parse arguments: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [--include-mismatch-modes|-m] [--help] [paths...]
 $rdpWidth = 800
 $rdpHeight = 600
 $pathArgs = @()
-$showAllModes = $false
+$includeMismatchModes = $false
 $testMonitor = $null
 $testModes = $null
 $argIndex = 0
@@ -137,14 +137,14 @@ $argIndex = 0
 while ($argIndex -lt $InputArgs.Count) {
     $arg = $InputArgs[$argIndex]
     if ($arg -eq '--help' -or $arg -eq '-h') {
-        Write-Host "Usage: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [--show-all-modes] [paths...]"
+        Write-Host "Usage: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [--include-mismatch-modes|-m] [paths...]"
         Write-Host ""
         Write-Host "Options:"
         Write-Host "  --rdp-resolution, -r  RDP resolution (default: 800x600)"
         Write-Host "                    WxH       explicit (e.g. 800x600, 1280x1024)"
         Write-Host "                    W         width-only, height from monitor aspect ratio (e.g. 1280)"
         Write-Host "                    WxN:D     width with aspect ratio (e.g. 1280x4:3)"
-        Write-Host "  --show-all-modes   Include usable modes even when ratio or refresh rate differs"
+        Write-Host "  --include-mismatch-modes, -m  Include usable modes even when ratio or refresh rate differs"
         Write-Host "  --help, -h            Show this help"
         Write-Host ""
         Write-Host "Arguments:"
@@ -243,8 +243,8 @@ while ($argIndex -lt $InputArgs.Count) {
             exit 1
         }
     }
-    elseif ($arg -eq '--show-all-modes') {
-        $showAllModes = $true
+    elseif ($arg -eq '--include-mismatch-modes' -or $arg -eq '-m') {
+        $includeMismatchModes = $true
     }
     elseif ($arg -eq '--test-monitor' -and $argIndex + 1 -lt $InputArgs.Count) {
         $argIndex++
@@ -323,7 +323,7 @@ if ($testMonitor) {
     }
 
     $minimumHeight = [int][Math]::Ceiling($rdpHeight + $chromeHeight)
-    $modeCatalog = Get-UsableModeCatalog -Modes $parsedModes -TargetFrequency $currentFrequency -MinimumHeight $minimumHeight -TargetRatio $currentRatio -RatioToleranceParam $RatioTolerance -ShowAllModes $showAllModes
+    $modeCatalog = Get-UsableModeCatalog -Modes $parsedModes -TargetFrequency $currentFrequency -MinimumHeight $minimumHeight -TargetRatio $currentRatio -RatioToleranceParam $RatioTolerance -IncludeMismatchModes $includeMismatchModes
     $modes = $modeCatalog.Included
 
     # Compute monitor resolution options for each mode
@@ -391,7 +391,7 @@ if ($testMonitor) {
         ChromeHeight = $chromeHeight
         RdpWidth = $rdpWidth
         RdpHeight = $rdpHeight
-        ShowAllModes = $showAllModes
+        IncludeMismatchModes = $includeMismatchModes
         ExcludedByRatioCount = $modeCatalog.ExcludedByRatioCount
         ExcludedByRefreshCount = $modeCatalog.ExcludedByRefreshCount
         ExcludedByBothCount = $modeCatalog.ExcludedByBothCount
@@ -480,7 +480,7 @@ public class MonitorResolutions
         public double ChromeHeight;
         public int RdpWidth;
         public int RdpHeight;
-        public bool ShowAllModes;
+        public bool IncludeMismatchModes;
         public int ExcludedByRatioCount;
         public int ExcludedByRefreshCount;
         public int ExcludedByBothCount;
@@ -530,7 +530,7 @@ public class MonitorResolutions
 
     static int Gcd(int a, int b) { while (b != 0) { int t = b; b = a % b; a = t; } return a; }
 
-    public static DisplayResult GetMonitorData(int rdp_width, int rdp_height, int max_zoom, double chrome_width_96dpi, double chrome_height_96dpi, double ratio_tolerance, double taskbar_height_96dpi, bool show_all_modes)
+    public static DisplayResult GetMonitorData(int rdp_width, int rdp_height, int max_zoom, double chrome_width_96dpi, double chrome_height_96dpi, double ratio_tolerance, double taskbar_height_96dpi, bool include_mismatch_modes)
     {
         DEVMODE devMode = new DEVMODE();
         devMode.dmSize = (short)Marshal.SizeOf<DEVMODE>();
@@ -624,7 +624,7 @@ public class MonitorResolutions
         int excludedByBothCount = 0;
         foreach (var candidate in resolutionCatalog.Values.OrderBy(c => c.Width).ThenBy(c => c.Height))
         {
-            if (show_all_modes || (candidate.RatioMatches && candidate.HasCurrentFrequency))
+            if (include_mismatch_modes || (candidate.RatioMatches && candidate.HasCurrentFrequency))
             {
                 monitorResolutions.Add(new MonitorResolution
                 {
@@ -718,7 +718,7 @@ public class MonitorResolutions
             ChromeHeight = chromeHeight,
             RdpWidth = rdp_width,
             RdpHeight = rdp_height,
-            ShowAllModes = show_all_modes,
+            IncludeMismatchModes = include_mismatch_modes,
             ExcludedByRatioCount = excludedByRatioCount,
             ExcludedByRefreshCount = excludedByRefreshCount,
             ExcludedByBothCount = excludedByBothCount,
@@ -745,7 +745,7 @@ if (-not ($typeName -as [type])) {
 
 $type = $typeName -as [type]
 if ($null -eq $type) { Write-Host "ERROR: Failed to load P/Invoke type '$typeName'."; exit 1 }
-$result = $type::GetMonitorData($rdpWidth, $rdpHeight, $MaxZoom, $ChromeWidthAt96Dpi, $ChromeHeightAt96Dpi, $RatioTolerance, $TaskbarHeightAt96Dpi, $showAllModes)
+$result = $type::GetMonitorData($rdpWidth, $rdpHeight, $MaxZoom, $ChromeWidthAt96Dpi, $ChromeHeightAt96Dpi, $RatioTolerance, $TaskbarHeightAt96Dpi, $includeMismatchModes)
 if ($result.Error) {
     Write-Host $result.Error
     exit 1
@@ -785,7 +785,7 @@ Write-ModeFilterSummary -Result $result
 $interactive = $rdpPaths.Count -gt 0
 $monitorResolutions = @()
 $optionNumber = 1
-$filterDescription = if ($result.ShowAllModes) { "including all usable modes" } else { "with same ratio and frequency" }
+$filterDescription = if ($result.IncludeMismatchModes) { "including all usable modes" } else { "with same ratio and frequency" }
 
 # Display 1-window and 2-window options sorted by area
 $oneWindowSorted = @(@($result.Computed) + @($result.ComputedTaskbar) | Sort-Object -Property AreaOnePercent -Descending)

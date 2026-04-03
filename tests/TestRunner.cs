@@ -41,8 +41,8 @@ Console.WriteLine();
 Console.WriteLine("=== PowerShell implementation ===");
 totalFailed += RunTestSuite(rows, realMonitor, ps1Path);
 Console.WriteLine();
-Console.WriteLine("=== Show-all-modes smoke test ===");
-totalFailed += RunShowAllModesSmokeTest(ps1Path);
+Console.WriteLine("=== Include-mismatch-modes smoke test ===");
+totalFailed += RunIncludeMismatchModesSmokeTest(ps1Path);
 
 return totalFailed > 0 ? 1 : 0;
 
@@ -181,10 +181,10 @@ static int CountOptionLines(string stdout, string sectionMarker)
     return count;
 }
 
-static int RunShowAllModesSmokeTest(string ps1Path)
+static int RunIncludeMismatchModesSmokeTest(string ps1Path)
 {
     var mon = SyntheticMonitor.All["synth_2560x1440_96dpi"];
-    string args = $"--test-monitor {mon.TestMonitorArg} --test-modes {mon.TestModesArg} --show-all-modes";
+    string args = $"--test-monitor {mon.TestMonitorArg} --test-modes {mon.TestModesArg} --include-mismatch-modes";
     var result = RunPs1(ps1Path, args, null);
     var failures = new List<string>();
 
@@ -193,17 +193,17 @@ static int RunShowAllModesSmokeTest(string ps1Path)
     if (!result.Stdout.Contains("including all usable modes sorted by area used"))
         failures.Add("Expected show-all heading in output.");
     if (!result.Stdout.Contains("1920x1200"))
-        failures.Add("Expected ratio-mismatched mode 1920x1200 to appear with --show-all-modes.");
-    if (result.Stdout.Contains("Run with --show-all-modes to include them."))
-        failures.Add("Did not expect default filter summary when --show-all-modes is active.");
+        failures.Add("Expected ratio-mismatched mode 1920x1200 to appear with --include-mismatch-modes.");
+    if (result.Stdout.Contains("Run with --include-mismatch-modes / -m to include them."))
+        failures.Add("Did not expect default filter summary when --include-mismatch-modes is active.");
 
     if (failures.Count == 0)
     {
-        Console.WriteLine("  PASS show-all-modes smoke test");
+        Console.WriteLine("  PASS include-mismatch-modes smoke test");
         return 0;
     }
 
-    Console.WriteLine("  FAIL show-all-modes smoke test");
+    Console.WriteLine("  FAIL include-mismatch-modes smoke test");
     foreach (string failure in failures)
         Console.WriteLine($"       {failure}");
     return 1;

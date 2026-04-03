@@ -37,8 +37,8 @@ static class Assertions
         {
             results.Add(AssertExitCode(result, 0));
             // Help text verified against PS1 output
-            results.Add(AssertContains(result.Stdout, "[-r WxH|W|WxN:D] [--show-all-modes] [paths...]", "help text"));
-            results.Add(AssertContains(result.Stdout, "--show-all-modes", "help switch"));
+            results.Add(AssertContains(result.Stdout, "[-r WxH|W|WxN:D] [--include-mismatch-modes|-m] [paths...]", "help text"));
+            results.Add(AssertContains(result.Stdout, "--include-mismatch-modes, -m", "help switch"));
             return results;
         }
         if (row.ResolutionArg == "invalid_format")
@@ -213,7 +213,7 @@ static class Assertions
         int totalExcluded = excludedByRatio + excludedByRefresh + excludedByBoth;
         if (totalExcluded == 0)
         {
-            results.Add(AssertNotContains(stdout, "Run with --show-all-modes to include them.", "no filter summary expected"));
+            results.Add(AssertNotContains(stdout, "Run with --include-mismatch-modes / -m to include them.", "no filter summary expected"));
             return results;
         }
 
@@ -226,7 +226,7 @@ static class Assertions
             parts.Add($"{excludedByBoth} both");
 
         string modeLabel = totalExcluded == 1 ? "mode" : "modes";
-        string expectedSummary = $"Also found {totalExcluded} other usable monitor {modeLabel} on this monitor ({string.Join(", ", parts)}). Run with --show-all-modes to include them.";
+        string expectedSummary = $"Also found {totalExcluded} other usable monitor {modeLabel} on this monitor ({string.Join(", ", parts)}). Run with --include-mismatch-modes / -m to include them.";
         results.Add(AssertContains(stdout, expectedSummary, "filter summary"));
         return results;
     }

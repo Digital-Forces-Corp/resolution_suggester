@@ -31,13 +31,13 @@ Invoke-WebRequest -Uri https://raw.githubusercontent.com/Digital-Forces-Corp/res
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "New-Item -ItemType Directory -Force -Path 'c:\dfc\scripts' | Out-Null; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Digital-Forces-Corp/resolution_suggester/main/resolutions_suggester.ps1' -OutFile 'c:\dfc\scripts\resolutions_suggester.ps1'"
 ```
 
-Alternate path for automation, or if Windows PowerShell 5.1 is unavailable:
+Alternate path if PowerShell is unavailable:
 
 ```powershell
 curl.exe -LO --output-dir c:\dfc\scripts https://raw.githubusercontent.com/Digital-Forces-Corp/resolution_suggester/main/resolutions_suggester.ps1
 ```
 
-The C# executable and winget distribution have been abandoned [csharp-winget-experiment.md](csharp-winget-experiment.md) to to be replaced by deploying an installer that drops the ps1 later.
+The C# executable and winget distribution worked but has been abandoned [csharp-winget-experiment.md](csharp-winget-experiment.md) to to be replaced by deploying an installer that drops the ps1 so users can debug with ai.
 
 ## Requirements
 
@@ -46,17 +46,18 @@ The C# executable and winget distribution have been abandoned [csharp-winget-exp
 ## Usage
 
 ```
+resolution_suggester c:\rdp\server.rdp  # interactive: choose monitor resolution, and L/R position
 resolution_suggester -h                 # show help
-resolution_suggester                    # default 800x600
-resolution_suggester --show-all-modes   # include usable modes with different ratio or refresh rate
-resolution_suggester -r 1280x1024       # 1280x1024
-resolution_suggester -r 1280            # width-only, height from monitor aspect ratio
-resolution_suggester -r 1280x4:3        # width with explicit 4:3 aspect ratio
-resolution_suggester c:\dfc\rdp\server.rdp         # interactive: choose monitor resolution, and L/R position
+resolution_suggester                    # default remote desktop 800x600
+resolution_suggester -r 1280x1024       # remote desktop 1280x1024
+resolution_suggester -r 1280            # remote desktop width-only, height from monitor aspect ratio
+resolution_suggester -r 1280x4:3        # remote desktop width with explicit 4:3 aspect ratio
+resolution_suggester -m                 # include usable monitor modes with different ratio or refresh rate
 resolution_suggester C:\dfc\rdp\        # interactive: choose monitor resolution, L/R position, and .rdp file
 ```
 
-`--rdp-resolution` / `-r` accepts three formats: `WxH` (explicit width and height), `W` (width-only, height derived from monitor aspect ratio), and `WxN:D` (width with explicit aspect ratio). Default is `800x600`. `-r` with no argument opens an interactive picker to select from common RDP resolutions. `--show-all-modes` includes usable monitor modes even when their aspect ratio or refresh rate differs from the current mode. The PowerShell script uses `-r` the same way.
+`--rdp-resolution` / `-r` accepts three formats: `WxH` (explicit width and height), `W` (width-only, height derived from monitor aspect ratio), and `WxN:D` (width with explicit aspect ratio). Default is `800x600`. `-r` with no argument opens an interactive picker to select from common RDP resolutions. 
+`--include-mismatch-modes` / `-m` includes usable monitor modes even when their aspect ratio or refresh rate differs from the current mode. 
 
 When `.rdp` file paths or directories are passed, the program enters interactive mode. It numbers each monitor resolution in the output, then prompts to choose a monitor resolution, an `.rdp` file (if multiple), and left/right window position. The selected `winposstr`, RDP resolution, and display settings are written directly into the `.rdp` file.
 
@@ -67,7 +68,7 @@ Current Monitor #1, 2560x1440, Ratio: 16:9, Frequency: 60Hz, DPI Scale 100%
 RDP 800x600 100% rdp zoom: winposstr:s:0,1,0,0,814,637  2nd: winposstr:s:0,1,1745,0,2559,637
 RDP 800x600 200% rdp zoom: winposstr:s:0,1,0,0,1614,1237  2nd: winposstr:s:0,1,945,0,2559,1237
 RDP 800x600 226% taskbar zoom: winposstr:s:0,1,0,0,1822,1392  2nd: winposstr:s:0,1,737,0,2559,1392
-Also found 2 other usable monitor modes on this monitor (1 ratio mismatch, 1 refresh mismatch). Run with --show-all-modes to include them.
+Also found 2 other usable monitor modes on this monitor (1 ratio mismatch, 1 refresh mismatch). Run with --include-mismatch-modes / -m to include them.
 
 --- Available monitor resolutions for 1 RDP 800x600 with same ratio and frequency sorted by area used ---
 *2560x1440, 69% area (71% width, 97% height), 226% taskbar zoom
@@ -84,7 +85,7 @@ Also found 2 other usable monitor modes on this monitor (1 ratio mismatch, 1 ref
 
 - Header line: monitor number, current monitor resolution, aspect ratio, refresh rate, DPI scale
 - `winposstr` lines: ready-to-use values for positioning the 1st and 2nd RDP windows at each zoom level (100%, 200%, and taskbar-fit)
-- Summary line: indicates when additional usable monitor modes were excluded by the default ratio and refresh-rate filters, and points to `--show-all-modes`
+- Summary line: indicates when additional usable monitor modes were excluded by the default ratio and refresh-rate filters, and points to `--include-mismatch-modes` / `-m`
 - Ranked lists: available monitor resolutions sorted by how efficiently they fill the screen for 1 or 2 RDP windows; numbered in interactive mode; includes both integer zoom (100%/200%) and taskbar zoom entries
 - `*` marks the current monitor resolution
 - Percentage values: `width` = horizontal space used, `height` = vertical space used, `area` = combined fill
@@ -114,10 +115,7 @@ The program:
 1. Calls `SetProcessDpiAwareness` with `PROCESS_PER_MONITOR_DPI_AWARE` to enable per-monitor DPI awareness
 2. Identifies the current monitor using `GetConsoleWindow` and `MonitorFromWindow` with `MONITOR_DEFAULTTONEAREST`
 3. Reads current display settings and DPI via `EnumDisplaySettings` and `GetDpiForMonitor`
-4. Enumerates all display modes for that monitor, filtering by default to same aspect ratio (ratio difference < 0.001), same refresh rate, and minimum height to fit at least one RDP session plus window chrome; `--show-all-modes` drops the ratio and refresh-rate filters while still requiring a usable height
+4. Enumerates all display modes for that monitor, filtering by default to same aspect ratio (ratio difference < 0.001), same refresh rate, and minimum height to fit at least one RDP session plus window chrome; `--include-mismatch-modes` / `-m` drops the ratio and refresh-rate filters while still requiring a usable height
 5. Computes the maximum integer zoom factor each monitor resolution supports (largest N where N * RDP height + chrome height <= monitor resolution height, capped at MaxZoom, currently 2)
 6. Computes a taskbar-fit zoom for each monitor resolution: the fractional zoom where `base height * zoom + decoration height + 48 * DPI scale = monitor height`, leaving exactly 48 DPI-scaled pixels for the Windows taskbar
 7. Calculates area usage percentages and ranks results
-
-## TODO ###
-At PTF we noticed that RDP respects smartsizing and allows stretching. Quality needs to be tested because it will invalidate the need to use this.
