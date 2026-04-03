@@ -1,6 +1,6 @@
 # Resolution Suggester
 
-Analyzes available monitor resolutions on the current monitor and recommends settings for running 1 or 2 RDP windows at a given base RDP resolution (default 800x600) with integer zoom up to 200%, plus a taskbar-fit zoom that maximizes the window while leaving space for the Windows taskbar.
+Analyzes available monitor resolutions on the current monitor and recommends settings for running 1 or 2 RDP windows at a given base RDP resolution (default 800x600), showing every supported whole-number zoom level from 100% through 200% plus a taskbar-fit zoom that maximizes the window while leaving space for the Windows taskbar.
 
 An RDP session at a given RDP resolution does not fit in exactly that many pixels on screen. The window chrome (title bar and borders) adds pixels in both dimensions, so the actual footprint is larger (e.g., 800x600 becomes 814x637 at 100% DPI). Chrome scales proportionally with the monitor's DPI setting — at 200% DPI the chrome is twice as large in pixels — so the program factors in the current DPI when calculating window sizes.
 
@@ -8,33 +8,27 @@ An RDP session at a given RDP resolution does not fit in exactly that many pixel
 
 1. Detects the monitor where the console is running (DPI and multi-monitor aware)
 2. Enumerates all available monitor resolutions matching the current aspect ratio and refresh rate, and reports when other usable monitor modes exist
-3. Calculates how much screen area an RDP window uses at each monitor resolution for integer zoom levels (100%, 200%) and a taskbar-fit zoom that leaves 48 DPI-scaled pixels for the taskbar
+3. Calculates how much screen area an RDP window uses at each monitor resolution for each supported whole-number zoom level from 100% up to the configured cap (currently 200%), along with a taskbar-fit zoom that leaves 48 DPI-scaled pixels for the taskbar
 4. Ranks monitor resolutions by area efficiency for single-window and dual-window layouts
 5. Outputs ready-to-use `winposstr` values for `.rdp` files to position windows at each zoom level
 6. Optionally edits `.rdp` files directly when file paths are passed as arguments (interactive mode)
 
 ## Install
 
+PowerShell script execution is assumed to be blocked with `running scripts is disabled on this system`, so execute the downloaded content directly instead of running a `.ps1` file from disk.
+
 Choose the path that matches your shell:
 
 1. Already in Windows PowerShell 5.1?
 
 ```powershell
-New-Item -ItemType Directory -Force -Path c:\dfc\scripts | Out-Null
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/Digital-Forces-Corp/resolution_suggester/main/resolutions_suggester.ps1 -OutFile c:\dfc\scripts\resolutions_suggester.ps1
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-WebRequest 'https://raw.githubusercontent.com/Digital-Forces-Corp/resolution_suggester/main/resolutions_suggester.ps1').Content))
 ```
 
 2. Starting from `cmd.exe`?
 
 ```bat
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "New-Item -ItemType Directory -Force -Path 'c:\dfc\scripts' | Out-Null; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Digital-Forces-Corp/resolution_suggester/main/resolutions_suggester.ps1' -OutFile 'c:\dfc\scripts\resolutions_suggester.ps1'"
-```
-
-Alternate path if PowerShell is unavailable:
-
-```powershell
-curl.exe -LO --output-dir c:\dfc\scripts https://raw.githubusercontent.com/Digital-Forces-Corp/resolution_suggester/main/resolutions_suggester.ps1
+powershell.exe -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-WebRequest 'https://raw.githubusercontent.com/Digital-Forces-Corp/resolution_suggester/main/resolutions_suggester.ps1').Content))"
 ```
 
 ## Simplifying Distribution
@@ -97,9 +91,9 @@ Also found 2 other usable monitor modes on this monitor (1 ratio mismatch, 1 ref
 ### Reading the Output
 
 - Header line: monitor number, current monitor resolution, aspect ratio, refresh rate, DPI scale
-- `winposstr` lines: ready-to-use values for positioning the 1st and 2nd RDP windows at each zoom level (100%, 200%, and taskbar-fit)
+- `winposstr` lines: ready-to-use values for positioning the 1st and 2nd RDP windows at each supported whole-number zoom level, plus the taskbar-fit entry
 - Summary line: indicates when additional usable monitor modes were excluded by the default ratio and refresh-rate filters, and points to `--include-mismatch-modes` / `-m`
-- Ranked lists: available monitor resolutions sorted by how efficiently they fill the screen for 1 or 2 RDP windows; numbered in interactive mode; includes both integer zoom (100%/200%) and taskbar zoom entries
+- Ranked lists: available monitor resolutions sorted by how efficiently they fill the screen for 1 or 2 RDP windows; numbered in interactive mode; includes every supported whole-number zoom entry together with the taskbar zoom entry
 - `*` marks the current monitor resolution
 - Percentage values: `width` = horizontal space used, `height` = vertical space used, `area` = combined fill
 - `overlap` (in dual-window list) = percentage the two windows overlap horizontally when they exceed monitor width
@@ -129,6 +123,6 @@ The program:
 2. Identifies the current monitor using `GetConsoleWindow` and `MonitorFromWindow` with `MONITOR_DEFAULTTONEAREST`
 3. Reads current display settings and DPI via `EnumDisplaySettings` and `GetDpiForMonitor`
 4. Enumerates all display modes for that monitor, filtering by default to same aspect ratio (ratio difference < 0.001), same refresh rate, and minimum height to fit at least one RDP session plus window chrome; `--include-mismatch-modes` / `-m` drops the ratio and refresh-rate filters while still requiring a usable height
-5. Computes the maximum integer zoom factor each monitor resolution supports (largest N where N * RDP height + chrome height <= monitor resolution height, capped at MaxZoom, currently 2)
+5. Computes the supported whole-number zoom factors for each monitor resolution, from 100% through the largest value where `N * RDP height + chrome height <= monitor resolution height`, capped at `MaxZoom` (currently 2)
 6. Computes a taskbar-fit zoom for each monitor resolution: the fractional zoom where `base height * zoom + decoration height + 48 * DPI scale = monitor height`, leaving exactly 48 DPI-scaled pixels for the Windows taskbar
 7. Calculates area usage percentages and ranks results
