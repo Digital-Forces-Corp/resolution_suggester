@@ -397,15 +397,18 @@ static class Assertions
         double taskbarH = TaskbarHeight96Dpi * dpiScale;
         foreach (var (modeW, modeH) in matchingModes)
         {
-            int zoom = Math.Min((int)Math.Floor((modeH - chromeH) / rdpH), MaxZoom);
-            double winWidth = rdpW * zoom + chromeW;
-            double winHeight = rdpH * zoom + chromeH;
-            int widthUsage = (int)Math.Round(winWidth / modeW * 100);
-            int widthUsageTwo = (int)Math.Round(2 * winWidth / modeW * 100);
-            int heightUsage = (int)Math.Round(winHeight / modeH * 100);
-            int areaOne = (int)Math.Round(Math.Min(widthUsage, 100) * heightUsage / 100.0);
-            int areaTwo = (int)Math.Round(Math.Min(widthUsageTwo, 100) * heightUsage / 100.0);
-            monitorResolutions.Add((modeW, modeH, (double)zoom, areaOne, areaTwo));
+            int maxIntegerZoom = Math.Min((int)Math.Floor((modeH - chromeH) / rdpH), MaxZoom);
+            for (int zoom = 1; zoom <= maxIntegerZoom; zoom++)
+            {
+                double winWidth = rdpW * zoom + chromeW;
+                double winHeight = rdpH * zoom + chromeH;
+                int widthUsage = (int)Math.Round(winWidth / modeW * 100);
+                int widthUsageTwo = (int)Math.Round(2 * winWidth / modeW * 100);
+                int heightUsage = (int)Math.Round(winHeight / modeH * 100);
+                int areaOne = (int)Math.Round(Math.Min(widthUsage, 100) * heightUsage / 100.0);
+                int areaTwo = (int)Math.Round(Math.Min(widthUsageTwo, 100) * heightUsage / 100.0);
+                monitorResolutions.Add((modeW, modeH, (double)zoom, areaOne, areaTwo));
+            }
 
             double tbZoom = (modeH - chromeH - taskbarH) / rdpH;
             if (tbZoom >= 1.0)

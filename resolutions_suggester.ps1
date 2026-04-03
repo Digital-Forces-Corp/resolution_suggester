@@ -331,26 +331,29 @@ if ($testMonitor) {
     # Not worth deduplicating — calling C# from the test path would add complexity for no gain.
     $computed = @()
     foreach ($mode in $modes) {
-        $zoom = [Math]::Min([int][Math]::Floor(($mode.Height - $chromeHeight) / $rdpHeight), $MaxZoom)
-        if ($zoom -lt 1) { continue }
-        $winWidth = $rdpWidth * $zoom + $chromeWidth
-        $winHeight = $rdpHeight * $zoom + $chromeHeight
-        $widthUsage = [int][Math]::Round($winWidth / $mode.Width * 100)
-        $widthUsageTwo = [int][Math]::Round(2 * $winWidth / $mode.Width * 100)
-        $heightUsage = [int][Math]::Round($winHeight / $mode.Height * 100)
-        $areaOne = [Math]::Min($widthUsage, 100) * $heightUsage
-        $areaTwo = [Math]::Min($widthUsageTwo, 100) * $heightUsage
+        $maxIntegerZoom = [Math]::Min([int][Math]::Floor(($mode.Height - $chromeHeight) / $rdpHeight), $MaxZoom)
+        if ($maxIntegerZoom -lt 1) { continue }
 
-        $computed += [PSCustomObject]@{
-            Width = $mode.Width
-            Height = $mode.Height
-            ZoomFactor = $zoom
-            WidthUsage = $widthUsage
-            WidthUsageTwo = $widthUsageTwo
-            HeightUsage = $heightUsage
-            AreaOnePercent = [int][Math]::Round($areaOne / 100.0)
-            AreaTwoPercent = [int][Math]::Round($areaTwo / 100.0)
-            IsCurrent = ($mode.Width -eq $currentWidth -and $mode.Height -eq $currentHeight)
+        for ($zoom = 1; $zoom -le $maxIntegerZoom; $zoom++) {
+            $winWidth = $rdpWidth * $zoom + $chromeWidth
+            $winHeight = $rdpHeight * $zoom + $chromeHeight
+            $widthUsage = [int][Math]::Round($winWidth / $mode.Width * 100)
+            $widthUsageTwo = [int][Math]::Round(2 * $winWidth / $mode.Width * 100)
+            $heightUsage = [int][Math]::Round($winHeight / $mode.Height * 100)
+            $areaOne = [Math]::Min($widthUsage, 100) * $heightUsage
+            $areaTwo = [Math]::Min($widthUsageTwo, 100) * $heightUsage
+
+            $computed += [PSCustomObject]@{
+                Width = $mode.Width
+                Height = $mode.Height
+                ZoomFactor = $zoom
+                WidthUsage = $widthUsage
+                WidthUsageTwo = $widthUsageTwo
+                HeightUsage = $heightUsage
+                AreaOnePercent = [int][Math]::Round($areaOne / 100.0)
+                AreaTwoPercent = [int][Math]::Round($areaTwo / 100.0)
+                IsCurrent = ($mode.Width -eq $currentWidth -and $mode.Height -eq $currentHeight)
+            }
         }
     }
 
@@ -653,28 +656,32 @@ public class MonitorResolutions
 
         foreach (var monitorResolution in monitorResolutions)
         {
-            int zoomFactor = Math.Min((int)Math.Floor((monitorResolution.Height - chromeHeight) / rdp_height), max_zoom);
-            if (zoomFactor < 1) continue;
-            double windowWidth = rdp_width * zoomFactor + chromeWidth;
-            double windowHeight = rdp_height * zoomFactor + chromeHeight;
-            int widthUsage = (int)Math.Round(windowWidth / monitorResolution.Width * 100);
-            int widthUsageTwo = (int)Math.Round(2 * windowWidth / monitorResolution.Width * 100);
-            int heightUsage = (int)Math.Round(windowHeight / monitorResolution.Height * 100);
-            int areaOne = Math.Min(widthUsage, 100) * heightUsage;
-            int areaTwo = Math.Min(widthUsageTwo, 100) * heightUsage;
+            int maxIntegerZoom = Math.Min((int)Math.Floor((monitorResolution.Height - chromeHeight) / rdp_height), max_zoom);
+            if (maxIntegerZoom < 1) continue;
 
-            computed.Add(new MonitorResolution
+            for (int zoomFactor = 1; zoomFactor <= maxIntegerZoom; zoomFactor++)
             {
-                Width = monitorResolution.Width,
-                Height = monitorResolution.Height,
-                ZoomFactor = zoomFactor,
-                WidthUsage = widthUsage,
-                WidthUsageTwo = widthUsageTwo,
-                HeightUsage = heightUsage,
-                AreaOnePercent = (int)Math.Round(areaOne / 100.0),
-                AreaTwoPercent = (int)Math.Round(areaTwo / 100.0),
-                IsCurrent = (monitorResolution.Width == currentWidth && monitorResolution.Height == currentHeight)
-            });
+                double windowWidth = rdp_width * zoomFactor + chromeWidth;
+                double windowHeight = rdp_height * zoomFactor + chromeHeight;
+                int widthUsage = (int)Math.Round(windowWidth / monitorResolution.Width * 100);
+                int widthUsageTwo = (int)Math.Round(2 * windowWidth / monitorResolution.Width * 100);
+                int heightUsage = (int)Math.Round(windowHeight / monitorResolution.Height * 100);
+                int areaOne = Math.Min(widthUsage, 100) * heightUsage;
+                int areaTwo = Math.Min(widthUsageTwo, 100) * heightUsage;
+
+                computed.Add(new MonitorResolution
+                {
+                    Width = monitorResolution.Width,
+                    Height = monitorResolution.Height,
+                    ZoomFactor = zoomFactor,
+                    WidthUsage = widthUsage,
+                    WidthUsageTwo = widthUsageTwo,
+                    HeightUsage = heightUsage,
+                    AreaOnePercent = (int)Math.Round(areaOne / 100.0),
+                    AreaTwoPercent = (int)Math.Round(areaTwo / 100.0),
+                    IsCurrent = (monitorResolution.Width == currentWidth && monitorResolution.Height == currentHeight)
+                });
+            }
         }
 
         var computedTaskbar = new List<MonitorResolution>();
