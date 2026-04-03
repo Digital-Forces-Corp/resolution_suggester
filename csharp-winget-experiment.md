@@ -30,14 +30,70 @@ curl.exe -LO --output-dir c:\dfc\scripts https://github.com/Digital-Forces-Corp/
 
 ## Release Workflow
 
-Pushing a `v*` tag triggers the [release workflow](.github/workflows/release.yml), which:
+The old GitHub Actions release workflow has been removed from `.github/workflows` because it now fails on every tagged push: it still expects the deleted `src/resolution_suggester.csproj` project and the old `.exe` publishing flow. The last workflow YAML is preserved here as historical reference.
 
-1. Validates the tag format (`v*.*.*`)
-2. Builds the project on `windows-latest`
-3. Runs the test suite
-4. Publishes the self-contained executable and verifies it exists
-5. Creates a GitHub Release with auto-generated release notes and the `.exe` attached
-6. Submits the new version to winget via `winget-releaser` (requires `WINGET_TOKEN` GitHub repository secret and a fork of `microsoft/winget-pkgs` under the repo owner — the action does not create a fork automatically)
+What it used to do:
+
+1. Validate the tag format (`v*.*.*`).
+2. Build the C# project on `windows-latest`.
+3. Run the test suite.
+4. Publish the self-contained executable and verify it exists.
+5. Create a GitHub Release with auto-generated notes and the `.exe` attached.
+
+Archived workflow YAML:
+
+```yaml
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write  # needed for softprops/action-gh-release to create releases
+
+jobs:
+  release:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Validate tag format
+        id: version
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: Tag '$GITHUB_REF_NAME' does not match expected format v*.*.*"
+            exit 1
+          fi
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-dotnet@3e891b0cb619bf60e2c25674b222b8940e2c1c25 # v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build
+        run: dotnet build src/resolution_suggester.csproj -c Release
+
+      - name: Test
+        run: dotnet run --project tests/ResolutionSuggesterTests.csproj -c Release
+
+      - name: Publish
+        run: dotnet publish src/resolution_suggester.csproj -c Release --no-build -o publish
+
+      - name: Verify published executable
+        shell: bash
+        run: test -f publish/resolution_suggester.exe || (echo "ERROR: publish/resolution_suggester.exe not found" && exit 1)
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@c062e08bd532815e2082a1c180f2aa45f82c0b72 # v2
+        with:
+          files: publish/resolution_suggester.exe
+          generate_release_notes: true
+```
 
 The package uses `InstallerType: portable` (bare `.exe`, no installer). Reference packages with the same pattern:
 
