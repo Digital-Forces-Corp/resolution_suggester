@@ -3,6 +3,7 @@ param(
     [string[]]$InputArgs
 )
 
+$Version = '2026-04-09T13:20-05:00'
 $MaxZoom = 2
 $TaskbarHeightAt96Dpi = 48
 $ChromeHeightAt96Dpi = 55.0 / 1.5
@@ -157,6 +158,8 @@ function Write-ModeFilterSummary($Result) {
     $breakdown = $parts -join ", "
     Write-Host "Also found $($Result.OtherUsableModeCount) other usable monitor $modeLabel on this monitor ($breakdown). Run with --include-mismatch-modes / -m to include them."
 }
+
+Write-Host "Resolution Suggester v$Version"
 
 # Parse arguments: resolutions_suggester.ps1 [-r WxH|W|WxN:D] [--include-mismatch-modes|-m] [--help] [paths...]
 $rdpWidth = 800
