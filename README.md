@@ -15,7 +15,7 @@ An RDP session at a given RDP resolution does not fit in exactly that many pixel
 
 ## Install
 
-Download the script, then run it from the download directory. PowerShell script execution is assumed to be blocked (`running scripts is disabled on this system`), so both steps use scriptblock invocation instead of running the `.ps1` directly.
+Download the script, then run it. PowerShell script execution is assumed to be blocked (`running scripts is disabled on this system`), so both steps use scriptblock invocation instead of running the `.ps1` directly.
 
 1. Download:
 

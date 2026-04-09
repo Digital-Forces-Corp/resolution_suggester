@@ -11,12 +11,15 @@ $RatioTolerance = 0.001
 $MaxRdpDimension = 8192
 $InvalidResolutionFormatMsg = "Invalid RDP resolution format. Use WxH, W, or WxN:D (e.g. 800x600, 1280, 1280x4:3)."
 
-function Read-MenuChoice([string]$Prompt, [int]$Min, [int]$Max) {
+function Read-MenuChoice([string]$Prompt, [int]$Min, [int]$Max, [int]$Default = -1) {
     Write-Host "$Prompt" -NoNewline
     $menuInput = [Console]::In.ReadLine()
     if ($null -eq $menuInput) {
         Write-Host "ERROR: No input received."
         exit 1
+    }
+    if ($menuInput.Trim() -eq '' -and $Default -ge $Min -and $Default -le $Max) {
+        return $Default
     }
     $parsed = 0
     if (-not [int]::TryParse($menuInput, [ref]$parsed) -or $parsed -lt $Min -or $parsed -gt $Max) {
@@ -54,7 +57,7 @@ function Read-RdpResolution {
         $ratioStr = $resItem.Ratio
         Write-Host "  $num. $($resolutionStr.PadRight(10)) $($ratioStr.PadRight(6)) $($resItem.Name)"
     }
-    $resNum = Read-MenuChoice "Select RDP resolution: " 1 $commonRdpResolutions.Count
+    $resNum = Read-MenuChoice "Select RDP resolution [1]: " 1 $commonRdpResolutions.Count 1
     return $commonRdpResolutions[$resNum - 1]
 }
 
