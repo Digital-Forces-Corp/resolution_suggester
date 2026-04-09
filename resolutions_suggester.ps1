@@ -28,6 +28,36 @@ function Read-MenuChoice([string]$Prompt, [int]$Min, [int]$Max) {
 
 function Get-Gcd([int]$a, [int]$b) { while ($b -ne 0) { $t = $b; $b = $a % $b; $a = $t } return $a }
 
+function Read-RdpResolution {
+    $commonRdpResolutions = @(
+        @{ W = 800;  H = 600;  Ratio = '4:3';   Name = 'SVGA' }
+        @{ W = 1024; H = 768;  Ratio = '4:3';   Name = 'XGA' }
+        @{ W = 1280; H = 720;  Ratio = '16:9';  Name = 'HD' }
+        @{ W = 1280; H = 800;  Ratio = '16:10'; Name = 'WXGA' }
+        @{ W = 1280; H = 1024; Ratio = '5:4';   Name = 'SXGA' }
+        @{ W = 1366; H = 768;  Ratio = '~16:9'; Name = 'HD' }
+        @{ W = 1440; H = 900;  Ratio = '16:10'; Name = 'WXGA+' }
+        @{ W = 1600; H = 900;  Ratio = '16:9';  Name = 'HD+' }
+        @{ W = 1680; H = 1050; Ratio = '16:10'; Name = 'WSXGA+' }
+        @{ W = 1600; H = 1200; Ratio = '4:3';   Name = 'UXGA' }
+        @{ W = 1920; H = 1080; Ratio = '16:9';  Name = 'FHD' }
+        @{ W = 1920; H = 1200; Ratio = '16:10'; Name = 'WUXGA' }
+        @{ W = 2560; H = 1080; Ratio = '~21:9'; Name = 'UWFHD' }
+        @{ W = 2560; H = 1440; Ratio = '16:9';  Name = 'QHD' }
+        @{ W = 2560; H = 1600; Ratio = '16:10'; Name = 'WQXGA' }
+    )
+    Write-Host "Common resolutions:"
+    for ($resIndex = 0; $resIndex -lt $commonRdpResolutions.Count; $resIndex++) {
+        $resItem = $commonRdpResolutions[$resIndex]
+        $num = ($resIndex + 1).ToString().PadLeft(2)
+        $resolutionStr = "$($resItem.W)x$($resItem.H)"
+        $ratioStr = $resItem.Ratio
+        Write-Host "  $num. $($resolutionStr.PadRight(10)) $($ratioStr.PadRight(6)) $($resItem.Name)"
+    }
+    $resNum = Read-MenuChoice "Select RDP resolution: " 1 $commonRdpResolutions.Count
+    return $commonRdpResolutions[$resNum - 1]
+}
+
 function Get-UsableModeCatalog([array]$Modes, [int]$TargetFrequency, [int]$MinimumHeight, [double]$TargetRatio, [double]$RatioToleranceParam, [bool]$IncludeMismatchModes) {
     $catalog = @{}
     foreach ($modeEntry in $Modes) {
@@ -154,34 +184,9 @@ while ($argIndex -lt $InputArgs.Count) {
         return
     }
     elseif (($arg -eq '--rdp-resolution' -or $arg -eq '-r') -and (($argIndex + 1 -ge $InputArgs.Count) -or $InputArgs[$argIndex + 1].StartsWith('--') -or $InputArgs[$argIndex + 1] -eq '-h')) {
-        $commonRdpResolutions = @(
-            @{ W = 800;  H = 600;  Ratio = '4:3';   Name = 'SVGA' }
-            @{ W = 1024; H = 768;  Ratio = '4:3';   Name = 'XGA' }
-            @{ W = 1280; H = 720;  Ratio = '16:9';  Name = 'HD' }
-            @{ W = 1280; H = 800;  Ratio = '16:10'; Name = 'WXGA' }
-            @{ W = 1280; H = 1024; Ratio = '5:4';   Name = 'SXGA' }
-            @{ W = 1366; H = 768;  Ratio = '~16:9'; Name = 'HD' }
-            @{ W = 1440; H = 900;  Ratio = '16:10'; Name = 'WXGA+' }
-            @{ W = 1600; H = 900;  Ratio = '16:9';  Name = 'HD+' }
-            @{ W = 1680; H = 1050; Ratio = '16:10'; Name = 'WSXGA+' }
-            @{ W = 1600; H = 1200; Ratio = '4:3';   Name = 'UXGA' }
-            @{ W = 1920; H = 1080; Ratio = '16:9';  Name = 'FHD' }
-            @{ W = 1920; H = 1200; Ratio = '16:10'; Name = 'WUXGA' }
-            @{ W = 2560; H = 1080; Ratio = '~21:9'; Name = 'UWFHD' }
-            @{ W = 2560; H = 1440; Ratio = '16:9';  Name = 'QHD' }
-            @{ W = 2560; H = 1600; Ratio = '16:10'; Name = 'WQXGA' }
-        )
-        Write-Host "Common resolutions:"
-        for ($resIndex = 0; $resIndex -lt $commonRdpResolutions.Count; $resIndex++) {
-            $resItem = $commonRdpResolutions[$resIndex]
-            $num = ($resIndex + 1).ToString().PadLeft(2)
-            $resolutionStr = "$($resItem.W)x$($resItem.H)"
-            $ratioStr = $resItem.Ratio
-            Write-Host "  $num. $($resolutionStr.PadRight(10)) $($ratioStr.PadRight(6)) $($resItem.Name)"
-        }
-        $resNum = Read-MenuChoice "Select RDP resolution: " 1 $commonRdpResolutions.Count
-        $rdpWidth = $commonRdpResolutions[$resNum - 1].W
-        $rdpHeight = $commonRdpResolutions[$resNum - 1].H
+        $selected = Read-RdpResolution
+        $rdpWidth = $selected.W
+        $rdpHeight = $selected.H
     }
     elseif ($arg -eq '--rdp-resolution' -or $arg -eq '-r') {
         $argIndex++
@@ -266,6 +271,18 @@ while ($argIndex -lt $InputArgs.Count) {
         $pathArgs += $arg
     }
     $argIndex++
+}
+
+if ($InputArgs.Count -eq 0) {
+    $selected = Read-RdpResolution
+    $rdpWidth = $selected.W
+    $rdpHeight = $selected.H
+    Write-Host "Include monitor modes with different ratio or refresh rate? (y/N) " -NoNewline
+    $mismatchInput = [Console]::In.ReadLine()
+    if ($mismatchInput -eq 'y' -or $mismatchInput -eq 'Y') {
+        $includeMismatchModes = $true
+    }
+    $pathArgs = @('.')
 }
 
 # Resolve .rdp file paths

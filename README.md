@@ -15,17 +15,33 @@ An RDP session at a given RDP resolution does not fit in exactly that many pixel
 
 ## Install
 
-PowerShell script execution is assumed to be blocked with `running scripts is disabled on this system`, so execute the downloaded content directly instead of running a `.ps1` file from disk.
+Download the script, then run it from the download directory. PowerShell script execution is assumed to be blocked (`running scripts is disabled on this system`), so both steps use scriptblock invocation instead of running the `.ps1` directly.
 
-Choose the path that matches your shell:
+1. Download:
 
-1. Already in Windows PowerShell 5.1?
+```powershell
+New-Item -ItemType Directory -Force C:\dfc\scripts | Out-Null; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest 'https://raw.githubusercontent.com/Digital-Forces-Corp/resolution_suggester/main/resolutions_suggester.ps1' -OutFile C:\dfc\scripts\resolutions_suggester.ps1
+```
+
+2. Run:
+
+```powershell
+& ([scriptblock]::Create((Get-Content -Raw C:\dfc\scripts\resolutions_suggester.ps1)))
+```
+
+The script prompts for RDP resolution and options interactively.
+
+## Run Without Installing
+
+PowerShell script execution is typically blocked (`running scripts is disabled on this system`). These one-liners bypass the restriction by downloading the script content and executing it as a scriptblock in memory — no `.ps1` file touches disk.
+
+From Windows PowerShell 5.1:
 
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-WebRequest 'https://raw.githubusercontent.com/Digital-Forces-Corp/resolution_suggester/main/resolutions_suggester.ps1').Content))
 ```
 
-2. Starting from `cmd.exe`?
+From `cmd.exe`:
 
 ```bat
 powershell.exe -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-WebRequest 'https://raw.githubusercontent.com/Digital-Forces-Corp/resolution_suggester/main/resolutions_suggester.ps1').Content))"
