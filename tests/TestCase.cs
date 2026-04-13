@@ -8,6 +8,27 @@ static class TestCase
     public const string FixtureTestDir = "testdir";
     public const string FixtureNonexistent = "nonexistent.rdp";
 
+    public const string ResHelp = "help";
+    public const string ResInvalidFormat = "invalid_format";
+    public const string ResInvalidRatio = "invalid_ratio";
+    public const string ResPicker = "picker";
+    public const string ResExplicitWxH = "explicit_WxH";
+    public const string ResWidthOnly = "width_only";
+    public const string ResWxND = "WxN_D";
+    public const string ResDefault = "default";
+
+    public const string SelOneWindow = "one_window";
+    public const string SelTwoWindow = "two_window";
+    public const string SelInvalid = "invalid_selection";
+
+    public const string SideLeft = "L";
+    public const string SideRight = "R";
+    public const string SideInvalid = "invalid_side";
+
+    public const string FileSelFirst = "first";
+    public const string FileSelSecond = "second";
+    public const string FileSelInvalid = "invalid_file";
+
     public record PictRow(
         string Monitor,
         string ResolutionArg,
@@ -54,16 +75,14 @@ static class TestCase
         // Resolution arg (picker goes after file paths so parser sees it as last arg with no value)
         switch (row.ResolutionArg)
         {
-            case "explicit_WxH": args.Add("-r 1024x768"); break;
-            case "width_only": args.Add("-r 1280"); break;
-            case "WxN_D": args.Add("-r 1280x4:3"); break;
-            case "help": args.Add("-h"); break;
-            case "invalid_format": args.Add("-r notaresolution"); break;
-            case "invalid_ratio": args.Add("-r 1280x0:0"); break;
-            // "picker" added after file paths below
-            // "default": no -r flag
-            case "picker": break;
-            case "default": break;
+            case ResExplicitWxH: args.Add("-r 1024x768"); break;
+            case ResWidthOnly: args.Add("-r 1280"); break;
+            case ResWxND: args.Add("-r 1280x4:3"); break;
+            case ResHelp: args.Add("-h"); break;
+            case ResInvalidFormat: args.Add("-r notaresolution"); break;
+            case ResInvalidRatio: args.Add("-r 1280x0:0"); break;
+            case ResPicker: break;
+            case ResDefault: break;
             default: throw new InvalidOperationException($"Unknown ResolutionArg value: {row.ResolutionArg}");
         }
 
@@ -89,7 +108,7 @@ static class TestCase
         }
 
         // Picker must come after file paths so arg parser sees -r as last arg (no next value)
-        if (row.ResolutionArg == "picker")
+        if (row.ResolutionArg == ResPicker)
             args.Add("-r");
 
         return string.Join(" ", args);
@@ -98,34 +117,34 @@ static class TestCase
     public static string? BuildStdin(PictRow row)
     {
         // Early-exit cases: no stdin needed
-        if (row.ResolutionArg == "help" || row.ResolutionArg == "invalid_format" || row.ResolutionArg == "invalid_ratio")
+        if (row.ResolutionArg == ResHelp || row.ResolutionArg == ResInvalidFormat || row.ResolutionArg == ResInvalidRatio)
             return null;
         // Zero files with no picker means non-interactive (no stdin needed)
-        if (row.FileCount == FixtureManager.FileCountZero && row.ResolutionArg != "picker")
+        if (row.FileCount == FixtureManager.FileCountZero && row.ResolutionArg != ResPicker)
             return null;
 
         var parts = new List<string>();
 
         // Picker: resolution selection comes first
-        if (row.ResolutionArg == "picker")
+        if (row.ResolutionArg == ResPicker)
             parts.Add(PickerSelection); // entry 3 = 1280x720
 
         // Monitor resolution selection (prompt order: monitor resolution, file, side)
         switch (row.MonitorResSel)
         {
-            case "one_window": parts.Add("1"); break;
-            case "two_window":
+            case SelOneWindow: parts.Add("1"); break;
+            case SelTwoWindow:
                 // Two-window options are numbered after one-window options.
                 // The exact number depends on how many modes pass filtering.
                 // Use a placeholder that TestRunner resolves after parsing stdout.
                 parts.Add("TWO_WINDOW_FIRST");
                 break;
-            case "invalid_selection": parts.Add("999"); break;
+            case SelInvalid: parts.Add("999"); break;
             default: throw new InvalidOperationException($"Unknown MonitorResSel value: {row.MonitorResSel}");
         }
 
         // Invalid selection exits early — no more prompts
-        if (row.MonitorResSel == "invalid_selection")
+        if (row.MonitorResSel == SelInvalid)
             return string.Join("\n", parts) + "\n";
 
         // File selection (only prompted when 2+ files)
@@ -133,23 +152,23 @@ static class TestCase
         {
             switch (row.FileSel)
             {
-                case "first": parts.Add("1"); break;
-                case "second": parts.Add("2"); break;
-                case "invalid_file": parts.Add("999"); break;
+                case FileSelFirst: parts.Add("1"); break;
+                case FileSelSecond: parts.Add("2"); break;
+                case FileSelInvalid: parts.Add("999"); break;
                 default: throw new InvalidOperationException($"Unknown FileSel value: {row.FileSel}");
             }
 
             // Invalid file exits early
-            if (row.FileSel == "invalid_file")
+            if (row.FileSel == FileSelInvalid)
                 return string.Join("\n", parts) + "\n";
         }
 
         // Side selection
         switch (row.Side)
         {
-            case "L": parts.Add("L"); break;
-            case "R": parts.Add("R"); break;
-            case "invalid_side": parts.Add("X"); break;
+            case SideLeft: parts.Add(SideLeft); break;
+            case SideRight: parts.Add(SideRight); break;
+            case SideInvalid: parts.Add("X"); break;
             default: throw new InvalidOperationException($"Unknown Side value: {row.Side}");
         }
 

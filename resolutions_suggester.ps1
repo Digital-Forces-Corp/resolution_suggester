@@ -3,7 +3,7 @@ param(
     [string[]]$InputArgs
 )
 
-$Version = '2026-04-09T13:20-05:00'
+$Version = '2026-04-13T09:22-05:00'
 $MaxZoom = 2
 $TaskbarHeightAt96Dpi = 48
 $ChromeHeightAt96Dpi = 55.0 / 1.5
@@ -91,14 +91,14 @@ function Get-UsableModeCatalog([array]$Modes, [int]$TargetFrequency, [int]$Minim
         }
     }
 
-    $included = @()
+    $included = [System.Collections.Generic.List[hashtable]]::new()
     $excludedByRatioCount = 0
     $excludedByRefreshCount = 0
     $excludedByBothCount = 0
 
     foreach ($candidate in ($catalog.Values | Sort-Object Width, Height)) {
         if ($IncludeMismatchModes -or ($candidate.RatioMatches -and $candidate.HasTargetFrequency)) {
-            $included += @{ Width = $candidate.Width; Height = $candidate.Height }
+            $included.Add(@{ Width = $candidate.Width; Height = $candidate.Height })
             continue
         }
 
@@ -114,7 +114,7 @@ function Get-UsableModeCatalog([array]$Modes, [int]$TargetFrequency, [int]$Minim
     }
 
     return [PSCustomObject]@{
-        Included = $included
+        Included = @($included)
         ExcludedByRatioCount = $excludedByRatioCount
         ExcludedByRefreshCount = $excludedByRefreshCount
         ExcludedByBothCount = $excludedByBothCount
@@ -292,13 +292,15 @@ if ($InputArgs.Count -eq 0) {
 }
 
 # Resolve .rdp file paths
-$rdpPaths = @()
+$rdpPaths = [System.Collections.Generic.List[string]]::new()
 foreach ($pathArg in $pathArgs) {
     $resolved = [System.IO.Path]::GetFullPath($pathArg)
     if (Test-Path $resolved -PathType Container) {
-        $rdpPaths += @(Get-ChildItem $resolved -Filter '*.rdp' | Select-Object -ExpandProperty FullName)
+        foreach ($rdpFile in @(Get-ChildItem $resolved -Filter '*.rdp' | Select-Object -ExpandProperty FullName)) {
+            $rdpPaths.Add($rdpFile)
+        }
     } else {
-        $rdpPaths += $resolved
+        $rdpPaths.Add($resolved)
     }
 }
 
@@ -327,7 +329,7 @@ if ($testMonitor) {
     }
 
     # Parse --test-modes into mode entries with frequency
-    $parsedModes = @()
+    $parsedModes = [System.Collections.Generic.List[hashtable]]::new()
     foreach ($modeStr in $testModes.Split(',')) {
         if ($modeStr -notmatch '^(\d+)x(\d+)(?:@(\d+)Hz)?$') {
             Write-Host "Invalid mode in --test-modes: $modeStr. Use WxH or WxH@FHz."
@@ -337,7 +339,7 @@ if ($testMonitor) {
         $modeH = [int]$Matches[2]
         $modeFreq = if ($Matches[3]) { [int]$Matches[3] } else { $currentFrequency }
 
-        $parsedModes += @{ Width = $modeW; Height = $modeH; Frequency = $modeFreq }
+        $parsedModes.Add(@{ Width = $modeW; Height = $modeH; Frequency = $modeFreq })
     }
 
     # Derive height from monitor aspect ratio when only width was specified
@@ -350,9 +352,8 @@ if ($testMonitor) {
     $modes = $modeCatalog.Included
 
     # Compute monitor resolution options for each mode
-    # NOTE: This zoom/area computation duplicates the embedded C# real-monitor path.
-    # Not worth deduplicating — calling C# from the test path would add complexity for no gain.
-    $computed = @()
+    # Not worth deduplicating with the embedded C# path — calling C# from the test path would add complexity for no gain.
+    $computed = [System.Collections.Generic.List[PSCustomObject]]::new()
     foreach ($mode in $modes) {
         $maxIntegerZoom = [Math]::Min([int][Math]::Floor(($mode.Height - $chromeHeight) / $rdpHeight), $MaxZoom)
         if ($maxIntegerZoom -lt 1) { continue }
@@ -366,7 +367,7 @@ if ($testMonitor) {
             $areaOne = [Math]::Min($widthUsage, 100) * $heightUsage
             $areaTwo = [Math]::Min($widthUsageTwo, 100) * $heightUsage
 
-            $computed += [PSCustomObject]@{
+            $computed.Add([PSCustomObject]@{
                 Width = $mode.Width
                 Height = $mode.Height
                 ZoomFactor = $zoom
@@ -376,12 +377,12 @@ if ($testMonitor) {
                 AreaOnePercent = [int][Math]::Round($areaOne / 100.0)
                 AreaTwoPercent = [int][Math]::Round($areaTwo / 100.0)
                 IsCurrent = ($mode.Width -eq $currentWidth -and $mode.Height -eq $currentHeight)
-            }
+            })
         }
     }
 
     $taskbarHeight = $TaskbarHeightAt96Dpi * $dpiScale
-    $computedTaskbar = @()
+    $computedTaskbar = [System.Collections.Generic.List[PSCustomObject]]::new()
     foreach ($mode in $modes) {
         $tbZoom = ($mode.Height - $chromeHeight - $taskbarHeight) / $rdpHeight
         if ($tbZoom -lt 1.0) { continue }
@@ -392,7 +393,7 @@ if ($testMonitor) {
         $tbHeightUsage = [int][Math]::Round($tbWinHeight / $mode.Height * 100)
         $tbAreaOne = [Math]::Min($tbWidthUsage, 100) * $tbHeightUsage
         $tbAreaTwo = [Math]::Min($tbWidthUsageTwo, 100) * $tbHeightUsage
-        $computedTaskbar += [PSCustomObject]@{
+        $computedTaskbar.Add([PSCustomObject]@{
             Width = $mode.Width
             Height = $mode.Height
             ZoomFactor = $tbZoom
@@ -402,7 +403,7 @@ if ($testMonitor) {
             AreaOnePercent = [int][Math]::Round($tbAreaOne / 100.0)
             AreaTwoPercent = [int][Math]::Round($tbAreaTwo / 100.0)
             IsCurrent = ($mode.Width -eq $currentWidth -and $mode.Height -eq $currentHeight)
-        }
+        })
     }
 
     $result = [PSCustomObject]@{

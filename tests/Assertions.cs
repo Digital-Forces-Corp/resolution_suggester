@@ -33,21 +33,20 @@ static class Assertions
         var results = new List<AssertResult>();
 
         // --- ResolutionArg early exits ---
-        if (row.ResolutionArg == "help")
+        if (row.ResolutionArg == TestCase.ResHelp)
         {
             results.Add(AssertExitCode(result, 0));
-            // Help text verified against PS1 output
             results.Add(AssertContains(result.Stdout, "[-r WxH|W|WxN:D] [--include-mismatch-modes|-m] [paths...]", "help text"));
             results.Add(AssertContains(result.Stdout, "--include-mismatch-modes, -m", "help switch"));
             return results;
         }
-        if (row.ResolutionArg == "invalid_format")
+        if (row.ResolutionArg == TestCase.ResInvalidFormat)
         {
             results.Add(AssertExitCode(result, 1));
             results.Add(AssertContains(result.Stdout, "Invalid RDP resolution format", "invalid format error"));
             return results;
         }
-        if (row.ResolutionArg == "invalid_ratio")
+        if (row.ResolutionArg == TestCase.ResInvalidRatio)
         {
             results.Add(AssertExitCode(result, 1));
             results.Add(AssertContains(result.Stdout, "Invalid aspect ratio", "invalid ratio error"));
@@ -55,14 +54,14 @@ static class Assertions
         }
 
         // --- Nonexistent file: crash after interactive prompts ---
-        if (row.FileCount == "nonexistent")
+        if (row.FileCount == FixtureManager.FileCountNonexistent)
         {
             results.Add(AssertExitCode(result, 1));
             return results;
         }
 
         // --- Invalid selection ---
-        if (row.MonitorResSel == "invalid_selection")
+        if (row.MonitorResSel == TestCase.SelInvalid)
         {
             results.Add(AssertExitCode(result, 1));
             results.Add(AssertContains(result.Stdout, "Invalid selection.", "invalid selection"));
@@ -70,7 +69,7 @@ static class Assertions
         }
 
         // --- Invalid file selection ---
-        if (row.FileSel == "invalid_file")
+        if (row.FileSel == TestCase.FileSelInvalid)
         {
             results.Add(AssertExitCode(result, 1));
             results.Add(AssertContains(result.Stdout, "Invalid selection.", "invalid file selection"));
@@ -78,7 +77,7 @@ static class Assertions
         }
 
         // --- Invalid side ---
-        if (row.Side == "invalid_side")
+        if (row.Side == TestCase.SideInvalid)
         {
             results.Add(AssertExitCode(result, 1));
             results.Add(AssertContains(result.Stdout, "Invalid selection.", "invalid side"));
@@ -107,7 +106,7 @@ static class Assertions
 
             // Noise modes must not appear in monitor resolution output
             // Skip when picker is active (picker menu lists common resolutions that match noise dimensions)
-            if (row.ResolutionArg != "picker")
+            if (row.ResolutionArg != TestCase.ResPicker)
             {
                 foreach (string noise in mon.NoiseModes)
                 {
@@ -121,7 +120,7 @@ static class Assertions
         }
 
         // Picker menu
-        if (row.ResolutionArg == "picker")
+        if (row.ResolutionArg == TestCase.ResPicker)
         {
             results.Add(AssertContains(result.Stdout, "Common resolutions:", "picker menu"));
         }
@@ -150,7 +149,7 @@ static class Assertions
         }
 
         // .rdp file assertions (only when files are involved and flow completes)
-        if (row.FileCount != "zero")
+        if (row.FileCount != FixtureManager.FileCountZero)
         {
             results.Add(AssertContains(result.Stdout, "Updated ", "update confirmation"));
             results.AddRange(AssertRdpFile(row, tempDir, rdpW, rdpH));
@@ -235,10 +234,10 @@ static class Assertions
     {
         return row.ResolutionArg switch
         {
-            "explicit_WxH" => ExplicitWxH_Width,
-            "width_only" => WidthOnly_Width,
-            "WxN_D" => WxND_Width,
-            "picker" => Picker_Width,
+            TestCase.ResExplicitWxH => ExplicitWxH_Width,
+            TestCase.ResWidthOnly => WidthOnly_Width,
+            TestCase.ResWxND => WxND_Width,
+            TestCase.ResPicker => Picker_Width,
             _ => Default_Width
         };
     }
@@ -247,10 +246,10 @@ static class Assertions
     {
         return row.ResolutionArg switch
         {
-            "explicit_WxH" => ExplicitWxH_Height,
-            "WxN_D" => WxND_Height,
-            "picker" => Picker_Height,
-            "width_only" => ComputeWidthOnlyHeight(WidthOnly_Width, realMonitor, synthMonitor),
+            TestCase.ResExplicitWxH => ExplicitWxH_Height,
+            TestCase.ResWxND => WxND_Height,
+            TestCase.ResPicker => Picker_Height,
+            TestCase.ResWidthOnly => ComputeWidthOnlyHeight(WidthOnly_Width, realMonitor, synthMonitor),
             _ => Default_Height
         };
     }
@@ -273,11 +272,11 @@ static class Assertions
 
         // Determine which file was targeted
         string targetFile;
-        if (row.FileCount == "directory")
+        if (row.FileCount == FixtureManager.FileCountDirectory)
         {
-            string subdir = Path.Combine(tempDir, "testdir");
+            string subdir = Path.Combine(tempDir, TestCase.FixtureTestDir);
             string[] rdpFiles = Directory.GetFiles(subdir, "*.rdp").OrderBy(f => f).ToArray();
-            int fileIndex = row.FileSel == "second" ? 1 : 0;
+            int fileIndex = row.FileSel == TestCase.FileSelSecond ? 1 : 0;
             if (fileIndex >= rdpFiles.Length)
             {
                 results.Add(Fail($"Expected at least {fileIndex + 1} .rdp file(s) in {subdir}, found {rdpFiles.Length}"));
@@ -290,28 +289,28 @@ static class Assertions
             {
                 int otherIndex = fileIndex == 0 ? 1 : 0;
                 // In directory setup, test1.rdp uses the rdpSettings fixture, test2.rdp is always test2.rdp
-                string otherFixture = Path.GetFileName(rdpFiles[otherIndex]) == "test2.rdp"
-                    ? Path.Combine(FixtureManager.FixturesDir, "test2.rdp")
+                string otherFixture = Path.GetFileName(rdpFiles[otherIndex]) == TestCase.FixtureTest2
+                    ? Path.Combine(FixtureManager.FixturesDir, TestCase.FixtureTest2)
                     : Path.Combine(FixtureManager.FixturesDir, GetFixtureFileName(row.RdpSettings));
                 results.AddRange(AssertFileUnchanged(rdpFiles[otherIndex], otherFixture));
             }
         }
-        else if (row.FileCount == "two")
+        else if (row.FileCount == FixtureManager.FileCountTwo)
         {
-            int fileIndex = row.FileSel == "second" ? 1 : 0;
-            string[] files = { Path.Combine(tempDir, "test1.rdp"), Path.Combine(tempDir, "test2.rdp") };
+            int fileIndex = row.FileSel == TestCase.FileSelSecond ? 1 : 0;
+            string[] files = { Path.Combine(tempDir, TestCase.FixtureTest1), Path.Combine(tempDir, TestCase.FixtureTest2) };
             targetFile = files[fileIndex];
 
             // Verify non-targeted file is byte-identical to its original fixture
             int otherIndex = fileIndex == 0 ? 1 : 0;
             string otherFixture = otherIndex == 0
                 ? Path.Combine(FixtureManager.FixturesDir, GetFixtureFileName(row.RdpSettings))
-                : Path.Combine(FixtureManager.FixturesDir, "test2.rdp");
+                : Path.Combine(FixtureManager.FixturesDir, TestCase.FixtureTest2);
             results.AddRange(AssertFileUnchanged(files[otherIndex], otherFixture));
         }
         else
         {
-            targetFile = Path.Combine(tempDir, "test1.rdp");
+            targetFile = Path.Combine(tempDir, TestCase.FixtureTest1);
         }
 
         if (!File.Exists(targetFile))
@@ -329,11 +328,6 @@ static class Assertions
         }
 
         string[] lines = File.ReadAllLines(targetFile, Encoding.Unicode);
-
-        // For the selected monitor resolution, we need to know which mode was selected.
-        // Parse the selection from stdout to get the mode dimensions.
-        // (Simplified: for one_window pick first option, for two_window pick first two-window option)
-        // This is handled by the stdout parsing below.
 
         // Check required settings exist exactly once
         int expectedSmartSizing = Environment.OSVersion.Version.Build >= 22000 ? 1 : 0;
@@ -429,9 +423,8 @@ static class Assertions
             throw new InvalidOperationException("No modes passed filtering for winposstr computation");
 
         (int selW, int selH, double selZoom, int, int) selectedMode;
-        if (row.MonitorResSel == "one_window")
+        if (row.MonitorResSel == TestCase.SelOneWindow)
         {
-            // Option 1 = first by area descending (one-window)
             selectedMode = monitorResolutions.OrderByDescending(s => s.AreaOne).First();
         }
         else
@@ -443,11 +436,11 @@ static class Assertions
         int winW = (int)Math.Ceiling(rdpW * selectedMode.selZoom + chromeW);
         int winH = (int)Math.Ceiling(rdpH * selectedMode.selZoom + chromeH);
 
-        if (row.Side == "L")
+        if (row.Side == TestCase.SideLeft)
         {
             return $"winposstr:s:0,1,0,0,{winW},{winH}";
         }
-        else // R
+        else
         {
             int x1 = selectedMode.selW - 1;
             int x0 = Math.Max(0, x1 - winW);
