@@ -151,12 +151,14 @@ In practice, the low-speed profile disables most cosmetic effects, while the hig
 
 ### Probing MSTSC Window Behavior
 
-Use [rdp_window_probe/rdp_window_probe.ps1](rdp_window_probe/rdp_window_probe.ps1) to iterate over `smart sizing`, `screen mode id`, the `showCmd` field in `winposstr`, selected `winposstr` right/bottom sizes, and a `smart_size_125` yes/no probe flag. The `smart_size_125` flag is only used when `smart sizing=1`; for `smart sizing=0`, the probe always records `smart_size_125=no`. When `smart_size_125=yes`, the script attempts to enlarge the live MSTSC window by 25% via Win32 before taking the final measurement. With the default settings, this produces 24 probe rows. It writes a CSV with the main window size, client size, and largest visible child window size.
+Use [rdp_window_probe/rdp_window_probe.ps1](rdp_window_probe/rdp_window_probe.ps1) to iterate over `smart sizing`, `screen mode id`, the `showCmd` field in `winposstr`, selected `winposstr` right/bottom sizes, and a `smart_size_125` yes/no probe flag. The `smart_size_125` flag is only used when `smart sizing=1`; for `smart sizing=0`, the probe always records `smart_size_125=no`. When `smart_size_125=yes`, the script attempts to enlarge the live MSTSC window by 25% via Win32 before taking the final measurement. With the default settings, this produces 24 probe rows. It writes a CSV with the main window size, client size, and largest visible child window size. Use `-SingleCase` to run exactly one probe row with scalar parameters instead of one-element arrays.
 
 Example:
 
 ```powershell
 powershell -File .\rdp_window_probe\rdp_window_probe.ps1
+
+powershell -File .\rdp_window_probe\rdp_window_probe.ps1 -SingleCase -TargetAddress 192.0.2.1 -SmartSizing 0 -ScreenModeId 1 -WinposShowCmd 1 -WinposSize 800x600
 ```
 
 ## How It Works

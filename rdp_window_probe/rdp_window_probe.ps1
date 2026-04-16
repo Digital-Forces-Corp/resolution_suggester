@@ -1,8 +1,13 @@
 param(
     [string]$BaseRdpPath = (Join-Path $PSScriptRoot 'ticket_highest_speed.rdp'),
     [string]$OutputCsvPath = (Join-Path $PSScriptRoot ("rdp-window-probe-{0:yyyyMMdd-HHmmss}.csv" -f (Get-Date))),
-    [string]$CaseName = '',
     [string]$TargetAddress = '',
+    [switch]$SingleCase,
+    [int]$SmartSizing = 0,
+    [int]$ScreenModeId = 1,
+    [int]$WinposShowCmd = 1,
+    [string]$WinposSize = '800x600',
+    [string]$SmartSize125 = 'no',
     [int[]]$SmartSizingValues = @(0, 1),
     [int[]]$ScreenModeIds = @(1, 2),
     [int[]]$WinposShowCmdValues = @(1, 3),
@@ -29,59 +34,64 @@ function ConvertTo-SizeSpec([string]$Spec) {
     }
 }
 
-function ConvertTo-YesNoValue([string]$Value, [string]$Name) {
+function ConvertTo-YesNoValue([string]$Value) {
     $normalized = $Value.Trim().ToLowerInvariant()
     if ($normalized -ne 'yes' -and $normalized -ne 'no') {
-        throw "Invalid $Name value '$Value'. Use 'yes' or 'no'."
+        throw "Invalid yes/no value '$Value'. Use 'yes' or 'no'."
     }
 
     return $normalized
 }
 
-function Set-RdpSettingLine([System.Collections.Generic.List[string]]$Lines, [string]$Key, [string]$Value) {
-    $pattern = "^$([regex]::Escape($Key)):"
+function Set-RdpSettingLine([System.Collections.Generic.List[string]]$Lines, [string]$Line) {
+    $key = $Line.Split(':')[0]
+    $pattern = "^$([regex]::Escape($key)):"
     for ($i = 0; $i -lt $Lines.Count; $i++) {
         if ($Lines[$i] -match $pattern) {
-            $Lines[$i] = $Value
+            $Lines[$i] = $Line
             return
         }
     }
 
-    $Lines.Add($Value)
+    $Lines.Add($Line)
 }
 
-function Get-CaseLabel([int]$CaseNumber, [int]$CaseCount) {
-    if ([string]::IsNullOrWhiteSpace($CaseName)) {
-        return ("case-{0:00}" -f $CaseNumber)
+function New-ProbeCase(
+    [int]$CaseNumber,
+    [int]$SmartSizingValue,
+    [int]$ScreenModeIdValue,
+    [int]$WinposShowCmdValue,
+    [string]$WinposSizeValue,
+    [string]$SmartSize125Value
+) {
+    $size = ConvertTo-SizeSpec $WinposSizeValue
+    $smartSize125Normalized = if ($SmartSizingValue -eq 1) {
+        ConvertTo-YesNoValue $SmartSize125Value
+    }
+    else {
+        'no'
     }
 
-    $trimmedName = $CaseName.Trim()
-    if ($CaseCount -eq 1) {
-        return $trimmedName
+    return [PSCustomObject]@{
+        CaseNumber = $CaseNumber
+        SmartSizing = $SmartSizingValue
+        ScreenModeId = $ScreenModeIdValue
+        WinposShowCmd = $WinposShowCmdValue
+        WinposWidth = $size.Width
+        WinposHeight = $size.Height
+        WinposSpec = $size.Spec
+        SmartSize125 = $smartSize125Normalized
     }
-
-    return ("{0}-{1:00}" -f $trimmedName, $CaseNumber)
-}
-
-function ConvertTo-SafeFileName([string]$Value) {
-    $invalidChars = [System.IO.Path]::GetInvalidFileNameChars()
-    $builder = New-Object System.Text.StringBuilder
-
-    foreach ($character in $Value.ToCharArray()) {
-        if ($invalidChars -contains $character) {
-            $null = $builder.Append('_')
-        }
-        else {
-            $null = $builder.Append($character)
-        }
-    }
-
-    return $builder.ToString()
 }
 
 function Get-ProbeCases {
     $cases = [System.Collections.Generic.List[object]]::new()
     $caseNumber = 1
+
+    if ($useSingleCase) {
+        $cases.Add((New-ProbeCase -CaseNumber $caseNumber -SmartSizingValue $SmartSizing -ScreenModeIdValue $ScreenModeId -WinposShowCmdValue $WinposShowCmd -WinposSizeValue $WinposSize -SmartSize125Value $SmartSize125))
+        return $cases
+    }
 
     foreach ($smartSizing in $SmartSizingValues) {
         foreach ($screenModeId in $ScreenModeIds) {
@@ -89,18 +99,7 @@ function Get-ProbeCases {
                 foreach ($sizeSpec in $WinposSizes) {
                     $smartSize125Options = if ($smartSizing -eq 1) { $SmartSize125Values } else { @('no') }
                     foreach ($smartSize125 in $smartSize125Options) {
-                        $size = ConvertTo-SizeSpec $sizeSpec
-                        $smartSize125Normalized = ConvertTo-YesNoValue $smartSize125 'SmartSize125'
-                        $cases.Add([PSCustomObject]@{
-                            CaseNumber = $caseNumber
-                            SmartSizing = $smartSizing
-                            ScreenModeId = $screenModeId
-                            WinposShowCmd = $showCmd
-                            WinposWidth = $size.Width
-                            WinposHeight = $size.Height
-                            WinposSpec = $size.Spec
-                            SmartSize125 = $smartSize125Normalized
-                        })
+                        $cases.Add((New-ProbeCase -CaseNumber $caseNumber -SmartSizingValue $smartSizing -ScreenModeIdValue $screenModeId -WinposShowCmdValue $showCmd -WinposSizeValue $sizeSpec -SmartSize125Value $smartSize125))
                         $caseNumber++
                     }
                 }
@@ -109,6 +108,11 @@ function Get-ProbeCases {
     }
 
     return $cases
+}
+
+function Get-PropertyOrNull([object]$Object, [string]$Property) {
+    if ($null -ne $Object) { return $Object.$Property }
+    return $null
 }
 
 function Wait-ForMainWindow([System.Diagnostics.Process]$Process, [int]$TimeoutSeconds) {
@@ -170,13 +174,20 @@ if (-not (Test-Path -LiteralPath $BaseRdpPath)) {
     throw "Base RDP file not found: $BaseRdpPath"
 }
 
+$singleCaseParameterNames = @('SmartSizing', 'ScreenModeId', 'WinposShowCmd', 'WinposSize', 'SmartSize125')
+$matrixParameterNames = @('SmartSizingValues', 'ScreenModeIds', 'WinposShowCmdValues', 'WinposSizes', 'SmartSize125Values')
+$useSingleCase = $SingleCase -or @($singleCaseParameterNames | Where-Object { $PSBoundParameters.ContainsKey($_) }).Count -gt 0
+if ($useSingleCase) {
+    $conflictingMatrixParameters = @($matrixParameterNames | Where-Object { $PSBoundParameters.ContainsKey($_) })
+    if ($conflictingMatrixParameters.Count -gt 0) {
+        throw "Do not combine single-case parameters with matrix parameters: $($conflictingMatrixParameters -join ', ')"
+    }
+}
+
 $hostWindowsVersion = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Version
 $cases = @(Get-ProbeCases)
-for ($i = 0; $i -lt $cases.Count; $i++) {
-    $cases[$i] | Add-Member -NotePropertyName CaseName -NotePropertyValue (Get-CaseLabel -CaseNumber $cases[$i].CaseNumber -CaseCount $cases.Count) -Force
-}
 if ($ListOnly) {
-    $cases | Format-Table CaseNumber, CaseName, SmartSizing, ScreenModeId, WinposShowCmd, WinposSpec, SmartSize125 -AutoSize
+    $cases | Format-Table SmartSizing, ScreenModeId, WinposShowCmd, WinposSpec, SmartSize125 -AutoSize
     return
 }
 
@@ -370,12 +381,11 @@ public static class RdpWindowProbe
             return true;
         }, IntPtr.Zero);
 
-        WindowInfo largestVisibleChild = visibleChildren
-            .OrderByDescending(c => c.Area)
-            .FirstOrDefault();
+        var sortedChildren = visibleChildren.OrderByDescending(c => c.Area).ToList();
 
-        string childSummary = string.Join(" | ", visibleChildren
-            .OrderByDescending(c => c.Area)
+        WindowInfo largestVisibleChild = sortedChildren.FirstOrDefault();
+
+        string childSummary = string.Join(" | ", sortedChildren
             .Take(8)
             .Select(c => string.Format("{0}:{1}x{2}@{3},{4}", c.WindowClass, c.Width, c.Height, c.Left, c.Top)));
 
@@ -437,21 +447,18 @@ $results = [System.Collections.Generic.List[object]]::new()
 
 try {
     foreach ($case in $cases) {
-        $probePath = Join-Path $tempRoot ((ConvertTo-SafeFileName $case.CaseName) + '.rdp')
-        $probeLines = [System.Collections.Generic.List[string]]::new()
-        foreach ($line in $baseLines) {
-            $probeLines.Add($line)
-        }
+        $probePath = Join-Path $tempRoot ("case-{0:00}.rdp" -f $case.CaseNumber)
+        $probeLines = [System.Collections.Generic.List[string]]::new([string[]]$baseLines)
 
-        Set-RdpSettingLine $probeLines 'smart sizing' "smart sizing:i:$($case.SmartSizing)"
-        Set-RdpSettingLine $probeLines 'screen mode id' "screen mode id:i:$($case.ScreenModeId)"
-        Set-RdpSettingLine $probeLines 'winposstr' "winposstr:s:0,$($case.WinposShowCmd),0,0,$($case.WinposWidth),$($case.WinposHeight)"
-        Set-RdpSettingLine $probeLines 'redirectsmartcards' 'redirectsmartcards:i:0'
-        Set-RdpSettingLine $probeLines 'redirectwebauthn' 'redirectwebauthn:i:0'
-        Set-RdpSettingLine $probeLines 'redirectclipboard' 'redirectclipboard:i:0'
-        Set-RdpSettingLine $probeLines 'drivestoredirect' 'drivestoredirect:s:'
+        Set-RdpSettingLine $probeLines "smart sizing:i:$($case.SmartSizing)"
+        Set-RdpSettingLine $probeLines "screen mode id:i:$($case.ScreenModeId)"
+        Set-RdpSettingLine $probeLines "winposstr:s:0,$($case.WinposShowCmd),0,0,$($case.WinposWidth),$($case.WinposHeight)"
+        Set-RdpSettingLine $probeLines 'redirectsmartcards:i:0'
+        Set-RdpSettingLine $probeLines 'redirectwebauthn:i:0'
+        Set-RdpSettingLine $probeLines 'redirectclipboard:i:0'
+        Set-RdpSettingLine $probeLines 'drivestoredirect:s:'
         if ($TargetAddress -ne '') {
-            Set-RdpSettingLine $probeLines 'full address' "full address:s:$TargetAddress"
+            Set-RdpSettingLine $probeLines "full address:s:$TargetAddress"
         }
 
         $probeLines | Set-Content -LiteralPath $probePath -Encoding Unicode
@@ -459,9 +466,7 @@ try {
         $process = $null
         $snapshot = $null
         $errorText = ''
-        $capturedHandle = $null
-
-        Write-Host ("[{0}/{1}] {2}: smart sizing={3}, screen mode id={4}, winpos showCmd={5}, winpos={6}, smart_size_125={7}" -f $case.CaseNumber, $cases.Count, $case.CaseName, $case.SmartSizing, $case.ScreenModeId, $case.WinposShowCmd, $case.WinposSpec, $case.SmartSize125)
+        Write-Host ("[{0}/{1}] smart sizing={2}, screen mode id={3}, winpos showCmd={4}, winpos={5}, smart_size_125={6}" -f $case.CaseNumber, $cases.Count, $case.SmartSizing, $case.ScreenModeId, $case.WinposShowCmd, $case.WinposSpec, $case.SmartSize125)
         try {
             $process = Start-Process -FilePath 'mstsc.exe' -ArgumentList "`"$probePath`"" -PassThru
             $null = Wait-ForMainWindow -Process $process -TimeoutSeconds $LaunchTimeoutSeconds
@@ -483,7 +488,6 @@ try {
                     continue
                 }
 
-                $capturedHandle = $hwnd.ToInt64()
                 try {
                     $snapshot = [RdpWindowProbe]::CaptureWindow($hwnd)
                     break
@@ -506,13 +510,8 @@ try {
             }
         }
 
-        $largestChild = $null
-        if ($null -ne $snapshot) {
-            $largestChild = $snapshot.LargestVisibleChild
-        }
+        $largestChild = Get-PropertyOrNull $snapshot 'LargestVisibleChild'
         $results.Add([PSCustomObject]@{
-            CaseNumber = $case.CaseNumber
-            CaseName = $case.CaseName
             HostWindowsVersion = $hostWindowsVersion
             SmartSizing = $case.SmartSizing
             SmartSize125 = $case.SmartSize125
@@ -520,20 +519,18 @@ try {
             WinposShowCmd = $case.WinposShowCmd
             WinposWidth = $case.WinposWidth
             WinposHeight = $case.WinposHeight
-            WindowHandle = if ($null -ne $snapshot) { $snapshot.Handle } else { $capturedHandle }
-            WindowClass = if ($null -ne $snapshot) { $snapshot.WindowClass } else { $null }
-            WindowTitle = if ($null -ne $snapshot) { $snapshot.Title } else { $null }
-            OuterWidth = if ($null -ne $snapshot) { $snapshot.OuterWidth } else { $null }
-            OuterHeight = if ($null -ne $snapshot) { $snapshot.OuterHeight } else { $null }
-            ClientWidth = if ($null -ne $snapshot) { $snapshot.ClientWidth } else { $null }
-            ClientHeight = if ($null -ne $snapshot) { $snapshot.ClientHeight } else { $null }
-            VisibleChildCount = if ($null -ne $snapshot) { $snapshot.VisibleChildCount } else { $null }
-            LargestChildClass = if ($null -ne $largestChild) { $largestChild.WindowClass } else { $null }
-            LargestChildWidth = if ($null -ne $largestChild) { $largestChild.Width } else { $null }
-            LargestChildHeight = if ($null -ne $largestChild) { $largestChild.Height } else { $null }
-            LargestChildLeft = if ($null -ne $largestChild) { $largestChild.Left } else { $null }
-            LargestChildTop = if ($null -ne $largestChild) { $largestChild.Top } else { $null }
-            ChildSummary = if ($null -ne $snapshot) { $snapshot.ChildSummary } else { $null }
+            WindowTitle = Get-PropertyOrNull $snapshot 'Title'
+            OuterWidth = Get-PropertyOrNull $snapshot 'OuterWidth'
+            OuterHeight = Get-PropertyOrNull $snapshot 'OuterHeight'
+            ClientWidth = Get-PropertyOrNull $snapshot 'ClientWidth'
+            ClientHeight = Get-PropertyOrNull $snapshot 'ClientHeight'
+            VisibleChildCount = Get-PropertyOrNull $snapshot 'VisibleChildCount'
+            LargestChildClass = Get-PropertyOrNull $largestChild 'WindowClass'
+            LargestChildWidth = Get-PropertyOrNull $largestChild 'Width'
+            LargestChildHeight = Get-PropertyOrNull $largestChild 'Height'
+            LargestChildLeft = Get-PropertyOrNull $largestChild 'Left'
+            LargestChildTop = Get-PropertyOrNull $largestChild 'Top'
+            ChildSummary = Get-PropertyOrNull $snapshot 'ChildSummary'
             ProbeFile = if ($KeepTempFiles) { $probePath } else { '' }
             Error = $errorText
         })
@@ -546,7 +543,7 @@ try {
 
     $results | Export-Csv -LiteralPath $OutputCsvPath -NoTypeInformation
     $results |
-        Select-Object CaseNumber, CaseName, HostWindowsVersion, SmartSizing, SmartSize125, ScreenModeId, WinposShowCmd, WinposWidth, WinposHeight, ClientWidth, ClientHeight, LargestChildWidth, LargestChildHeight, Error |
+        Select-Object HostWindowsVersion, SmartSizing, SmartSize125, ScreenModeId, WinposShowCmd, WinposWidth, WinposHeight, ClientWidth, ClientHeight, LargestChildWidth, LargestChildHeight, Error |
         Format-Table -AutoSize
     Write-Host "Wrote probe results to $OutputCsvPath"
     if ($KeepTempFiles) {
