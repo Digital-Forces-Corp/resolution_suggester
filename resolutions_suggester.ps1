@@ -3,7 +3,7 @@ param(
     [string[]]$InputArgs
 )
 
-$Version = '2026-04-13T09:22-05:00'
+$Version = '2026-04-16T11:15-05:00'
 $MaxZoom = 2
 $TaskbarHeightAt96Dpi = 48
 $ChromeHeightAt96Dpi = 55.0 / 1.5
@@ -797,7 +797,7 @@ $rdpLabel = "RDP ${rdpWidth}x${rdpHeight}"
 for ($zoom = 1; $zoom -le $MaxZoom; $zoom++) {
     $winW = [int][Math]::Ceiling($rdpWidth * $zoom + $result.ChromeWidth)
     $winH = [int][Math]::Ceiling($rdpHeight * $zoom + $result.ChromeHeight)
-    $x1 = $result.CurrentWidth - 1
+    $x1 = $result.CurrentWidth
     $x0 = [Math]::Max(0, $x1 - $winW)
     Write-Host "$rdpLabel $($zoom * 100)% rdp zoom: winposstr:s:0,1,0,0,$winW,$winH  2nd: winposstr:s:0,1,$x0,0,$x1,$winH"
 }
@@ -807,7 +807,7 @@ if ($taskbarZoom -ge 1.0) {
     $taskbarZoomPct = [int][Math]::Round($taskbarZoom * 100)
     $winW = [int][Math]::Ceiling($rdpWidth * $taskbarZoom + $result.ChromeWidth)
     $winH = [int][Math]::Ceiling($rdpHeight * $taskbarZoom + $result.ChromeHeight)
-    $x1 = $result.CurrentWidth - 1
+    $x1 = $result.CurrentWidth
     $x0 = [Math]::Max(0, $x1 - $winW)
     Write-Host "$rdpLabel ${taskbarZoomPct}% taskbar zoom: winposstr:s:0,1,0,0,$winW,$winH  2nd: winposstr:s:0,1,$x0,0,$x1,$winH"
 }
@@ -860,7 +860,7 @@ $winH = [int][Math]::Ceiling($rdpHeight * $monitorResolutionSelected.ZoomFactor 
 if ($side -eq 'L') {
     $winposstr = "winposstr:s:0,1,0,0,$winW,$winH"
 } else {
-    $x1 = $monitorResolutionSelected.Width - 1
+    $x1 = $monitorResolutionSelected.Width
     $x0 = [Math]::Max(0, $x1 - $winW)
     $winposstr = "winposstr:s:0,1,$x0,0,$x1,$winH"
 }

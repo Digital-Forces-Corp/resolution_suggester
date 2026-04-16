@@ -88,9 +88,9 @@ When `.rdp` file paths or directories are passed, the program enters interactive
 
 ```
 Current Monitor #1, 2560x1440, Ratio: 16:9, Frequency: 60Hz, DPI Scale 100%
-RDP 800x600 100% rdp zoom: winposstr:s:0,1,0,0,814,637  2nd: winposstr:s:0,1,1745,0,2559,637
-RDP 800x600 200% rdp zoom: winposstr:s:0,1,0,0,1614,1237  2nd: winposstr:s:0,1,945,0,2559,1237
-RDP 800x600 226% taskbar zoom: winposstr:s:0,1,0,0,1822,1392  2nd: winposstr:s:0,1,737,0,2559,1392
+RDP 800x600 100% rdp zoom: winposstr:s:0,1,0,0,814,637  2nd: winposstr:s:0,1,1746,0,2560,637
+RDP 800x600 200% rdp zoom: winposstr:s:0,1,0,0,1614,1237  2nd: winposstr:s:0,1,946,0,2560,1237
+RDP 800x600 226% taskbar zoom: winposstr:s:0,1,0,0,1822,1392  2nd: winposstr:s:0,1,738,0,2560,1392
 Also found 2 other usable monitor modes on this monitor (1 ratio mismatch, 1 refresh mismatch). Run with --include-mismatch-modes / -m to include them.
 
 --- Available monitor resolutions for 1 RDP 800x600 with same ratio and frequency sorted by area used ---
@@ -130,6 +130,34 @@ winposstr:s:0,1,0,0,814,637
 - `allow font smoothing` \- enables ClearType rendering in the session
 - `desktopwidth` / `desktopheight` \- the remote session resolution (must match the `-r` value passed to the program)
 - `winposstr` \- window position on the local monitor; format: `flags,showCmd,left,top,right,bottom`
+
+Note: when you create or save an `.rdp` file in the Remote Desktop Connection GUI, `winposstr` is typically carried over from the current per-user `Default.rdp` state rather than recomputed from `desktopwidth` / `desktopheight`. In practice, GUI-created files often inherit the last remembered local client window rectangle.
+
+### Speed Profiles
+
+The built-in Remote Desktop speed presets mainly change the connection type and a small set of visual-effect toggles.
+
+| Setting | Highest speed | Lowest speed |
+| --- | --- | --- |
+| `connection type:i` | `6` | `1` |
+| `disable wallpaper:i` | `0` | `1` |
+| `allow font smoothing:i` | `1` | `0` |
+| `allow desktop composition:i` | `1` | `0` |
+| `disable full window drag:i` | `0` | `1` |
+| `disable menu anims:i` | `0` | `1` |
+| `disable themes:i` | `0` | `1` |
+
+In practice, the low-speed profile disables most cosmetic effects, while the high-speed profile leaves them enabled.
+
+### Probing MSTSC Window Behavior
+
+Use [rdp_window_probe/rdp_window_probe.ps1](rdp_window_probe/rdp_window_probe.ps1) to iterate over `smart sizing`, `screen mode id`, the `showCmd` field in `winposstr`, selected `winposstr` right/bottom sizes, and a `smart_size_125` yes/no probe flag. The `smart_size_125` flag is only used when `smart sizing=1`; for `smart sizing=0`, the probe always records `smart_size_125=no`. When `smart_size_125=yes`, the script attempts to enlarge the live MSTSC window by 25% via Win32 before taking the final measurement. With the default settings, this produces 24 probe rows. It writes a CSV with the main window size, client size, and largest visible child window size.
+
+Example:
+
+```powershell
+powershell -File .\rdp_window_probe\rdp_window_probe.ps1
+```
 
 ## How It Works
 
