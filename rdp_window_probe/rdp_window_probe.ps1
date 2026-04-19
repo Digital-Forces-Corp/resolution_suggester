@@ -30,7 +30,6 @@ function ConvertTo-SizeSpec([string]$Spec) {
     return [PSCustomObject]@{
         Width = [int]$Matches[1]
         Height = [int]$Matches[2]
-        Spec = $Spec
     }
 }
 
@@ -79,7 +78,7 @@ function New-ProbeCase(
         WinposShowCmd = $WinposShowCmdValue
         WinposWidth = $size.Width
         WinposHeight = $size.Height
-        WinposSpec = $size.Spec
+        WinposSpec = $WinposSizeValue
         SmartSize125 = $smartSize125Normalized
     }
 }
@@ -184,12 +183,13 @@ if ($useSingleCase) {
     }
 }
 
-$hostWindowsVersion = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Version
 $cases = @(Get-ProbeCases)
 if ($ListOnly) {
     $cases | Format-Table SmartSizing, ScreenModeId, WinposShowCmd, WinposSpec, SmartSize125 -AutoSize
     return
 }
+
+$hostWindowsVersion = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Version
 
 $source = @"
 using System;
@@ -207,13 +207,6 @@ public static class RdpWindowProbe
         public int Top;
         public int Right;
         public int Bottom;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct POINT
-    {
-        public int X;
-        public int Y;
     }
 
     public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
@@ -236,9 +229,6 @@ public static class RdpWindowProbe
     [DllImport("user32.dll")]
     private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
 
-    [DllImport("user32.dll")]
-    private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
-
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
@@ -253,24 +243,13 @@ public static class RdpWindowProbe
         public WindowInfo()
         {
             WindowClass = "";
-            Title = "";
         }
 
-        public long Handle { get; set; }
         public string WindowClass { get; set; }
-        public string Title { get; set; }
         public int Left { get; set; }
         public int Top { get; set; }
-        public int Right { get; set; }
-        public int Bottom { get; set; }
         public int Width { get; set; }
         public int Height { get; set; }
-        public int Area { get; set; }
-    }
-
-    private class WindowMatch
-    {
-        public IntPtr Handle { get; set; }
         public int Area { get; set; }
     }
 
@@ -278,24 +257,13 @@ public static class RdpWindowProbe
     {
         public WindowSnapshot()
         {
-            WindowClass = "";
             Title = "";
             ChildSummary = "";
         }
 
-        public long Handle { get; set; }
-        public string WindowClass { get; set; }
         public string Title { get; set; }
-        public int OuterLeft { get; set; }
-        public int OuterTop { get; set; }
-        public int OuterRight { get; set; }
-        public int OuterBottom { get; set; }
         public int OuterWidth { get; set; }
         public int OuterHeight { get; set; }
-        public int ClientLeft { get; set; }
-        public int ClientTop { get; set; }
-        public int ClientRight { get; set; }
-        public int ClientBottom { get; set; }
         public int ClientWidth { get; set; }
         public int ClientHeight { get; set; }
         public int VisibleChildCount { get; set; }
@@ -305,7 +273,8 @@ public static class RdpWindowProbe
 
     public static IntPtr FindBestWindowForProcess(int processId)
     {
-        var matches = new List<WindowMatch>();
+        IntPtr bestHandle = IntPtr.Zero;
+        int bestArea = 0;
         EnumWindows((hwnd, _) =>
         {
             if (!IsWindowVisible(hwnd))
@@ -323,15 +292,15 @@ public static class RdpWindowProbe
             int width = Math.Max(0, rect.Right - rect.Left);
             int height = Math.Max(0, rect.Bottom - rect.Top);
             int area = width * height;
-            if (area > 0)
-                matches.Add(new WindowMatch { Handle = hwnd, Area = area });
+            if (area > bestArea)
+            {
+                bestArea = area;
+                bestHandle = hwnd;
+            }
             return true;
         }, IntPtr.Zero);
 
-        if (matches.Count == 0)
-            return IntPtr.Zero;
-
-        return matches.OrderByDescending(x => x.Area).First().Handle;
+        return bestHandle;
     }
 
     public static WindowSnapshot CaptureWindow(IntPtr hwnd)
@@ -343,11 +312,6 @@ public static class RdpWindowProbe
         RECT clientRect;
         if (!GetClientRect(hwnd, out clientRect))
             throw new InvalidOperationException("GetClientRect failed.");
-
-        POINT clientTopLeft = new POINT { X = clientRect.Left, Y = clientRect.Top };
-        POINT clientBottomRight = new POINT { X = clientRect.Right, Y = clientRect.Bottom };
-        ClientToScreen(hwnd, ref clientTopLeft);
-        ClientToScreen(hwnd, ref clientBottomRight);
 
         var visibleChildren = new List<WindowInfo>();
         EnumChildWindows(hwnd, (childHwnd, _) =>
@@ -367,13 +331,9 @@ public static class RdpWindowProbe
 
             visibleChildren.Add(new WindowInfo
             {
-                Handle = childHwnd.ToInt64(),
                 WindowClass = GetWindowClass(childHwnd),
-                Title = GetWindowCaption(childHwnd),
                 Left = childRect.Left,
                 Top = childRect.Top,
-                Right = childRect.Right,
-                Bottom = childRect.Bottom,
                 Width = width,
                 Height = height,
                 Area = area
@@ -391,25 +351,24 @@ public static class RdpWindowProbe
 
         return new WindowSnapshot
         {
-            Handle = hwnd.ToInt64(),
-            WindowClass = GetWindowClass(hwnd),
             Title = GetWindowCaption(hwnd),
-            OuterLeft = outerRect.Left,
-            OuterTop = outerRect.Top,
-            OuterRight = outerRect.Right,
-            OuterBottom = outerRect.Bottom,
             OuterWidth = Math.Max(0, outerRect.Right - outerRect.Left),
             OuterHeight = Math.Max(0, outerRect.Bottom - outerRect.Top),
-            ClientLeft = clientTopLeft.X,
-            ClientTop = clientTopLeft.Y,
-            ClientRight = clientBottomRight.X,
-            ClientBottom = clientBottomRight.Y,
-            ClientWidth = Math.Max(0, clientBottomRight.X - clientTopLeft.X),
-            ClientHeight = Math.Max(0, clientBottomRight.Y - clientTopLeft.Y),
+            ClientWidth = Math.Max(0, clientRect.Right - clientRect.Left),
+            ClientHeight = Math.Max(0, clientRect.Bottom - clientRect.Top),
             VisibleChildCount = visibleChildren.Count,
             LargestVisibleChild = largestVisibleChild,
             ChildSummary = childSummary
         };
+    }
+
+    public static void GetOuterSize(IntPtr hwnd, out int width, out int height)
+    {
+        RECT rect;
+        if (!GetWindowRect(hwnd, out rect))
+            throw new InvalidOperationException("GetWindowRect failed.");
+        width = Math.Max(0, rect.Right - rect.Left);
+        height = Math.Max(0, rect.Bottom - rect.Top);
     }
 
     public static void ResizeWindowKeepPosition(IntPtr hwnd, int width, int height)
@@ -440,7 +399,14 @@ public static class RdpWindowProbe
 
 Add-Type -TypeDefinition $source -Language CSharp
 
-$baseLines = @(Get-Content -LiteralPath $BaseRdpPath -Encoding Unicode)
+$baseLines = [System.Collections.Generic.List[string]]::new([string[]]@(Get-Content -LiteralPath $BaseRdpPath -Encoding Unicode))
+Set-RdpSettingLine $baseLines 'redirectsmartcards:i:0'
+Set-RdpSettingLine $baseLines 'redirectwebauthn:i:0'
+Set-RdpSettingLine $baseLines 'redirectclipboard:i:0'
+Set-RdpSettingLine $baseLines 'drivestoredirect:s:'
+if ($TargetAddress -ne '') {
+    Set-RdpSettingLine $baseLines "full address:s:$TargetAddress"
+}
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("rdp-window-probe-{0}" -f ([guid]::NewGuid().ToString('N')))
 $null = New-Item -ItemType Directory -Path $tempRoot
 $results = [System.Collections.Generic.List[object]]::new()
@@ -448,18 +414,11 @@ $results = [System.Collections.Generic.List[object]]::new()
 try {
     foreach ($case in $cases) {
         $probePath = Join-Path $tempRoot ("case-{0:00}.rdp" -f $case.CaseNumber)
-        $probeLines = [System.Collections.Generic.List[string]]::new([string[]]$baseLines)
+        $probeLines = [System.Collections.Generic.List[string]]::new($baseLines)
 
         Set-RdpSettingLine $probeLines "smart sizing:i:$($case.SmartSizing)"
         Set-RdpSettingLine $probeLines "screen mode id:i:$($case.ScreenModeId)"
         Set-RdpSettingLine $probeLines "winposstr:s:0,$($case.WinposShowCmd),0,0,$($case.WinposWidth),$($case.WinposHeight)"
-        Set-RdpSettingLine $probeLines 'redirectsmartcards:i:0'
-        Set-RdpSettingLine $probeLines 'redirectwebauthn:i:0'
-        Set-RdpSettingLine $probeLines 'redirectclipboard:i:0'
-        Set-RdpSettingLine $probeLines 'drivestoredirect:s:'
-        if ($TargetAddress -ne '') {
-            Set-RdpSettingLine $probeLines "full address:s:$TargetAddress"
-        }
 
         $probeLines | Set-Content -LiteralPath $probePath -Encoding Unicode
 
@@ -471,12 +430,13 @@ try {
             $process = Start-Process -FilePath 'mstsc.exe' -ArgumentList "`"$probePath`"" -PassThru
             $null = Wait-ForMainWindow -Process $process -TimeoutSeconds $LaunchTimeoutSeconds
             Start-Sleep -Milliseconds $SettleMilliseconds
-            if ($case.SmartSizing -eq 1 -and $case.SmartSize125 -eq 'yes') {
+            if ($case.SmartSize125 -eq 'yes') {
                 $resizeHwnd = [RdpWindowProbe]::FindBestWindowForProcess($process.Id)
                 if ($resizeHwnd -ne [IntPtr]::Zero) {
-                    $preResizeSnapshot = [RdpWindowProbe]::CaptureWindow($resizeHwnd)
-                    $targetOuterWidth = [int][Math]::Ceiling($preResizeSnapshot.OuterWidth * 1.25)
-                    $targetOuterHeight = [int][Math]::Ceiling($preResizeSnapshot.OuterHeight * 1.25)
+                    $preWidth = 0; $preHeight = 0
+                    [RdpWindowProbe]::GetOuterSize($resizeHwnd, [ref]$preWidth, [ref]$preHeight)
+                    $targetOuterWidth = [int][Math]::Ceiling($preWidth * 1.25)
+                    $targetOuterHeight = [int][Math]::Ceiling($preHeight * 1.25)
                     [RdpWindowProbe]::ResizeWindowKeepPosition($resizeHwnd, $targetOuterWidth, $targetOuterHeight)
                     Start-Sleep -Milliseconds ([Math]::Max(500, [int]($SettleMilliseconds / 2)))
                 }
