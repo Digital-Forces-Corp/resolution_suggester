@@ -151,12 +151,12 @@ In practice, the low-speed profile disables most cosmetic effects, while the hig
 
 ### Probing MSTSC Window Behavior
 
-Use [rdp_window_probe/rdp_window_probe.ps1](rdp_window_probe/rdp_window_probe.ps1) to iterate over `smart sizing`, `screen mode id`, the `showCmd` field in `winposstr`, selected `winposstr` right/bottom sizes, and a `smart_size_125` yes/no probe flag. The `smart_size_125` flag is only used when `smart sizing=1`; for `smart sizing=0`, the probe always records `smart_size_125=no`. When `smart_size_125=yes`, the script attempts to enlarge the live MSTSC window by 25% via Win32 before taking the final measurement. With the default settings, this produces 12 probe rows. It writes a compact CSV with the window title plus the main window and client dimensions. If MSTSC first shows a security warning dialog, the probe waits indefinitely for that title to disappear before capturing the final window.
+Use [rdp_window_probe/rdp_window_probe.ps1](rdp_window_probe/rdp_window_probe.ps1) to iterate over `smart sizing`, the `showCmd` field in `winposstr`, selected `winposstr` right/bottom sizes, and a `smart_size_125` yes/no probe flag. The script always uses `screen mode id=1` (windowed); `id=2` takes over the whole screen, making window measurement meaningless. The `smart_size_125` flag is only used when `smart sizing=1`; for `smart sizing=0`, the probe always records `smart_size_125=no`. When `smart_size_125=yes`, the script attempts to enlarge the live MSTSC window by 25% via Win32 before taking the final measurement. With the default settings, this produces 12 probe rows. It writes a compact CSV with the window title plus the main window and client dimensions. If MSTSC first shows a security warning dialog, the probe waits indefinitely for that title to disappear before capturing the final window.
 
 Key parameters:
 
 - `-TargetAddress <host>` overrides the `full address:s:` line in the base `.rdp` file. Applies to both the full sweep and `-SingleCase`.
-- `-SingleCase` runs exactly one probe row using the scalar parameters (`-SmartSizing`, `-ScreenModeId`, `-WinposShowCmd`, `-WinposSize`, `-SmartSize125`) instead of sweeping the array parameters.
+- `-SingleCase` runs exactly one probe row using the scalar parameters (`-SmartSizing`, `-WinposShowCmd`, `-WinposSize`, `-SmartSize125`) instead of sweeping the array parameters.
 
 Use [rdp_window_probe/set_rdp_warning.ps1](rdp_window_probe/set_rdp_warning.ps1) to manage the RDP redirection warning dialogs. Run it with no argument to print the current status and usage; pass `disabled` to suppress the dialogs (sets `HKLM\Software\Policies\Microsoft\Windows NT\Terminal Services\Client\RedirectionWarningDialogVersion=1` and `HKCU\Software\Microsoft\Terminal Server Client\RdpLaunchConsentAccepted=1`) or `enabled` to restore them; the script self-elevates if the current PowerShell session is not elevated.
 
@@ -175,7 +175,7 @@ powershell -File .\rdp_window_probe\rdp_window_probe.ps1
 powershell -File .\rdp_window_probe\rdp_window_probe.ps1 -TargetAddress 192.0.2.1
 
 # Single probe row, fully specified
-powershell -File .\rdp_window_probe\rdp_window_probe.ps1 -SingleCase -TargetAddress 192.0.2.1 -SmartSizing 0 -ScreenModeId 1 -WinposShowCmd 1 -WinposSize 800x600
+powershell -File .\rdp_window_probe\rdp_window_probe.ps1 -SingleCase -TargetAddress 192.0.2.1 -SmartSizing 0 -WinposShowCmd 1 -WinposSize 800x600
 ```
 
 Findings:
