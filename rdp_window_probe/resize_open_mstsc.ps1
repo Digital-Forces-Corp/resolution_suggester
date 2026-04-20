@@ -33,6 +33,17 @@
 # session window below the negotiated desktop size — it scales the bitmap down
 # but does NOT renegotiate / change the remote desktop resolution. Enlarging
 # beyond the original size is not honored either.
+#
+# NOTE: XP target (DEV2024) was logging Event ID 50 / Source TermDD ("The RDP
+# protocol component X.224 detected an error in the protocol stream and has
+# disconnected the client") — "An internal error has occurred" on the client.
+# Also Event ID 1006 / Source TermService ("The terminal server received large
+# number of incomplete connections. The system may be under attack.") — XP
+# treating rapid failed probe connections as a flood.
+# Attempted fix: security layer:i:0 + authentication level:i:0 in ticket_highest_speed.rdp
+# (disables TLS/NLA, falls back to classic RDP security that XP supports).
+# Result: did NOT help — error persists.
+# Reference: https://petri.com/remote-desktop-connection-an-internal-error-has-occurred/
 
 [CmdletBinding()]
 param(

@@ -2,11 +2,6 @@ param(
     [string]$BaseRdpPath = (Join-Path $PSScriptRoot 'ticket_highest_speed.rdp'),
     [string]$OutputCsvPath = (Join-Path $PSScriptRoot ("rdp-window-probe-{0:yyyyMMdd-HHmmss}.csv" -f (Get-Date))),
     [string]$TargetAddress = '',
-    [switch]$SingleCase,
-    [int]$SmartSizing = 0,
-    [int]$WinposShowCmd = 1,
-    [string]$WinposSize = '800x600',
-    [string]$SmartSize125 = 'no',
     [int[]]$SmartSizingValues = @(0, 1),
     # screen mode id is always 1 (windowed); id=2 is fullscreen and takes over the whole screen, making window measurement meaningless
     [int[]]$WinposShowCmdValues = @(1, 3),
@@ -20,7 +15,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Set-Variable -Name ExtraChrome -Option Constant -Value 100
+Set-Variable -Name ExtraChrome     -Option Constant -Value 100   # extra px added to winposstr width/height to give MSTSC room to breathe
+Set-Variable -Name WaitTimeoutMs   -Option Constant -Value 10000  # ms to wait for the session window to become ready
+Set-Variable -Name RetryIntervalMs -Option Constant -Value 200    # polling interval inside Wait-ForProbeWindow
+Set-Variable -Name RetryCount      -Option Constant -Value 3      # attempts for the per-case retry loop
+Set-Variable -Name ProbeTempDir    -Option Constant -Value (Join-Path $env:TEMP 'rdp_window_probe')
 
 function ConvertTo-SizeSpec([string]$Spec) {
     if ($Spec -notmatch '^(\d+)x(\d+)$') {
@@ -55,47 +54,31 @@ function Set-RdpSettingLine([System.Collections.Generic.List[string]]$Lines, [st
     $Lines.Add($Line)
 }
 
-function New-ProbeCase(
-    [int]$CaseNumber,
-    [int]$SmartSizingValue,
-    [int]$WinposShowCmdValue,
-    [string]$WinposSizeValue,
-    [string]$SmartSize125Value
+function Get-ProbeCases(
+    [int[]]$SmartSizingList,
+    [int[]]$WinposShowCmdList,
+    [string[]]$WinposSizeList,
+    [string[]]$SmartSize125List
 ) {
-    $size = ConvertTo-SizeSpec $WinposSizeValue
-    $smartSize125Normalized = if ($SmartSizingValue -eq 1) {
-        ConvertTo-YesNoValue $SmartSize125Value
-    }
-    else {
-        'no'
-    }
-
-    return [PSCustomObject]@{
-        CaseNumber = $CaseNumber
-        SmartSizing = $SmartSizingValue
-        WinposShowCmd = $WinposShowCmdValue
-        WinposWidth = $size.Width
-        WinposHeight = $size.Height
-        WinposSpec = $WinposSizeValue
-        SmartSize125 = $smartSize125Normalized
-    }
-}
-
-function Get-ProbeCases {
     $cases = [System.Collections.Generic.List[object]]::new()
     $caseNumber = 1
 
-    if ($useSingleCase) {
-        $cases.Add((New-ProbeCase -CaseNumber $caseNumber -SmartSizingValue $SmartSizing -WinposShowCmdValue $WinposShowCmd -WinposSizeValue $WinposSize -SmartSize125Value $SmartSize125))
-        return $cases
-    }
-
-    foreach ($smartSizing in $SmartSizingValues) {
-        foreach ($showCmd in $WinposShowCmdValues) {
-            foreach ($sizeSpec in $WinposSizes) {
-                $smartSize125Options = if ($smartSizing -eq 1) { $SmartSize125Values } else { @('no') }
+    foreach ($smartSizing in $SmartSizingList) {
+        foreach ($showCmd in $WinposShowCmdList) {
+            foreach ($sizeSpec in $WinposSizeList) {
+                $size = ConvertTo-SizeSpec $sizeSpec
+                $smartSize125Options = if ($smartSizing -eq 1) { $SmartSize125List } else { @('no') }
                 foreach ($smartSize125 in $smartSize125Options) {
-                    $cases.Add((New-ProbeCase -CaseNumber $caseNumber -SmartSizingValue $smartSizing -WinposShowCmdValue $showCmd -WinposSizeValue $sizeSpec -SmartSize125Value $smartSize125))
+                    $smartSize125Normalized = if ($smartSizing -eq 1) { ConvertTo-YesNoValue $smartSize125 } else { 'no' }
+                    $cases.Add([PSCustomObject]@{
+                        CaseNumber = $caseNumber
+                        SmartSizing = $smartSizing
+                        WinposShowCmd = $showCmd
+                        WinposWidth = $size.Width
+                        WinposHeight = $size.Height
+                        WinposSpec = $sizeSpec
+                        SmartSize125 = $smartSize125Normalized
+                    })
                     $caseNumber++
                 }
             }
@@ -105,66 +88,15 @@ function Get-ProbeCases {
     return $cases
 }
 
-function Get-PropertyOrNull([object]$Object, [string]$Property) {
-    if ($null -ne $Object) { return $Object.$Property }
-    return $null
-}
-
-function Select-ProbeOutput([object[]]$Results, [switch]$ForConsole) {
-    $properties = @(
-        'TargetIP',
-        'HostWindowsVersion',
-        'SmartSizing',
-        'sz*1.25',
-        'WinposShowCmd',
-        'WinposWidth',
-        'WinposHeight',
-        'OuterWidth',
-        'OuterHeight',
-        'ClientWidth',
-        'ClientHeight',
-        'Error'
-    )
-
-    if (-not $ForConsole) {
-        $properties += 'WindowTitle'
-    }
-
-    return $Results | Select-Object $properties
-}
-
-function Test-IsSecurityWarningTitle([string]$Title) {
-    if ([string]::IsNullOrWhiteSpace($Title)) {
-        return $false
-    }
-
-    return $Title.IndexOf('security warning', [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-}
-
 function Test-IsProbeWindowReady([string]$Title) {
     if ([string]::IsNullOrWhiteSpace($Title)) {
         return $false
     }
-
-    if (Test-IsSecurityWarningTitle $Title) {
-        return $false
-    }
-
-    # The bare "Remote Desktop Connection" title belongs to the transient boot-stub
-    # window that gets destroyed once the real session window opens. Wait for the
-    # session window, whose title is prefixed with the .rdp filename and address
-    # (e.g. "case-07 - 192.168.44.101 - Remote Desktop Connection").
-    $trimmed = $Title.Trim()
-    if ([string]::Equals($trimmed, 'Remote Desktop Connection', [System.StringComparison]::OrdinalIgnoreCase)) {
-        return $false
-    }
-
-    return $trimmed.IndexOf('Remote Desktop Connection', [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    return $Title.IndexOf('security warning', [System.StringComparison]::OrdinalIgnoreCase) -lt 0
 }
 
-function Wait-ForProbeWindow([System.Diagnostics.Process]$Process, [string]$TitleToken, [int]$TimeoutMilliseconds = 10000) {
+function Wait-ForProbeWindow([System.Diagnostics.Process]$Process, [string]$TitleToken, [int]$TimeoutMilliseconds = $WaitTimeoutMs) {
     $seenTitles = [System.Collections.Generic.List[string]]::new()
-    $lastWindowTitle = ''
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
 
     while ($true) {
@@ -176,57 +108,36 @@ function Wait-ForProbeWindow([System.Diagnostics.Process]$Process, [string]$Titl
             throw $ex
         }
 
-        $hwnd = [RdpWindowProbe]::FindBestWindowByTitleToken($TitleToken, 0)
-        if ($hwnd -ne [IntPtr]::Zero) {
-            try {
-                $snapshot = [RdpWindowProbe]::CaptureWindow($hwnd)
-                $lastWindowTitle = $snapshot.Title
-                if ($lastWindowTitle -and ($seenTitles.Count -eq 0 -or $seenTitles[$seenTitles.Count - 1] -ne $lastWindowTitle)) {
-                    $seenTitles.Add($lastWindowTitle)
-                }
-                if (Test-IsProbeWindowReady $snapshot.Title) {
-                    return [PSCustomObject]@{
-                        Handle = $hwnd
-                        Snapshot = $snapshot
-                        SeenTitles = $seenTitles -join ' | '
-                    }
+        if (-not $Process.HasExited) {
+            $scan = [RdpWindowProbe]::ScanProcessWindows($Process.Id, $TitleToken)
+            foreach ($t in $scan.Titles) {
+                if ($seenTitles.Count -eq 0 -or $seenTitles[$seenTitles.Count - 1] -ne $t) {
+                    $seenTitles.Add($t)
                 }
             }
-            catch {
+            if ($scan.SessionHandle -ne [IntPtr]::Zero) {
+                try {
+                    $snapshot = [RdpWindowProbe]::CaptureWindow($scan.SessionHandle)
+                    if (Test-IsProbeWindowReady $snapshot.Title) {
+                        return [PSCustomObject]@{
+                            Handle = $scan.SessionHandle
+                            Snapshot = $snapshot
+                            SeenTitles = $seenTitles -join ' | '
+                        }
+                    }
+                }
+                catch {
+                }
             }
         }
 
-        Start-Sleep -Milliseconds 200
+        Start-Sleep -Milliseconds $RetryIntervalMs
     }
 }
 
 function Stop-MstscProcess([System.Diagnostics.Process]$Process) {
-    if ($null -eq $Process) {
-        return
-    }
-
-    try {
-        if ($Process.HasExited) {
-            return
-        }
-    }
-    catch {
-        return
-    }
-
-    try {
-        $null = $Process.CloseMainWindow()
-        if ($Process.WaitForExit(5000)) {
-            return
-        }
-    }
-    catch {
-    }
-
-    try {
-        Stop-Process -Id $Process.Id -Force -ErrorAction Stop
-    }
-    catch {
+    if ($null -ne $Process) {
+        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -234,28 +145,18 @@ if (-not (Test-Path -LiteralPath $BaseRdpPath)) {
     throw "Base RDP file not found: $BaseRdpPath"
 }
 
-$singleCaseParameterNames = @('SmartSizing', 'WinposShowCmd', 'WinposSize', 'SmartSize125')
-$matrixParameterNames = @('SmartSizingValues', 'WinposShowCmdValues', 'WinposSizes', 'SmartSize125Values')
-$useSingleCase = $SingleCase -or @($singleCaseParameterNames | Where-Object { $PSBoundParameters.ContainsKey($_) }).Count -gt 0
-if ($useSingleCase) {
-    $conflictingMatrixParameters = @($matrixParameterNames | Where-Object { $PSBoundParameters.ContainsKey($_) })
-    if ($conflictingMatrixParameters.Count -gt 0) {
-        throw "Do not combine single-case parameters with matrix parameters: $($conflictingMatrixParameters -join ', ')"
-    }
-}
+$cases = @(Get-ProbeCases -SmartSizingList $SmartSizingValues -WinposShowCmdList $WinposShowCmdValues -WinposSizeList $WinposSizes -SmartSize125List $SmartSize125Values)
 
-$cases = @(Get-ProbeCases)
 if ($ListOnly) {
     $cases | Format-Table SmartSizing, WinposShowCmd, WinposSpec, SmartSize125 -AutoSize
     return
 }
 
-$hostWindowsVersion = Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Version
+$hostWindowsVersion = [System.Environment]::OSVersion.Version.ToString()
 
 $source = @"
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -274,9 +175,6 @@ public static class RdpWindowProbe
 
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    private static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hWnd);
@@ -324,39 +222,30 @@ public static class RdpWindowProbe
         return false;
     }
 
-    public class WindowInfo
-    {
-        public WindowInfo()
-        {
-            WindowClass = "";
-        }
-
-        public string WindowClass { get; set; }
-        public int Left { get; set; }
-        public int Top { get; set; }
-        public int Width { get; set; }
-        public int Height { get; set; }
-        public int Area { get; set; }
-    }
-
     public class WindowSnapshot
     {
         public WindowSnapshot()
         {
             Title = "";
-            ChildSummary = "";
-            WindowClass = "";
         }
 
         public string Title { get; set; }
-        public string WindowClass { get; set; }
         public int OuterWidth { get; set; }
         public int OuterHeight { get; set; }
         public int ClientWidth { get; set; }
         public int ClientHeight { get; set; }
-        public int VisibleChildCount { get; set; }
-        public string ChildSummary { get; set; }
-        public WindowInfo LargestVisibleChild { get; set; }
+    }
+
+    public class ScanResult
+    {
+        public ScanResult()
+        {
+            Titles = new List<string>();
+            SessionHandle = IntPtr.Zero;
+        }
+
+        public IntPtr SessionHandle { get; set; }
+        public List<string> Titles { get; set; }
     }
 
     private static readonly string[] SessionWindowClasses = new[]
@@ -366,19 +255,23 @@ public static class RdpWindowProbe
         "OPWindowClass"
     };
 
-    public static IntPtr FindBestWindowForProcess(int processId)
+    public static ScanResult ScanProcessWindows(int processId, string sessionTitleToken)
     {
-        return FindBestWindowByTitleToken(null, processId);
-    }
-
-    public static IntPtr FindBestWindowByTitleToken(string titleToken, int processId)
-    {
-        IntPtr bestHandle = IntPtr.Zero;
+        var result = new ScanResult();
         int bestArea = 0;
         EnumWindows((hwnd, _) =>
         {
             if (!IsWindowVisible(hwnd))
                 return true;
+
+            uint pid;
+            GetWindowThreadProcessId(hwnd, out pid);
+            if ((int)pid != processId)
+                return true;
+
+            string title = GetWindowCaption(hwnd);
+            if (!string.IsNullOrWhiteSpace(title))
+                result.Titles.Add(title);
 
             string cls = GetWindowClass(hwnd);
             bool isSessionClass = false;
@@ -393,19 +286,9 @@ public static class RdpWindowProbe
             if (!isSessionClass)
                 return true;
 
-            if (!string.IsNullOrEmpty(titleToken))
-            {
-                string title = GetWindowCaption(hwnd);
-                if (title.IndexOf(titleToken, StringComparison.OrdinalIgnoreCase) < 0)
-                    return true;
-            }
-            else if (processId > 0)
-            {
-                uint pid;
-                GetWindowThreadProcessId(hwnd, out pid);
-                if ((int)pid != processId)
-                    return true;
-            }
+            if (!string.IsNullOrEmpty(sessionTitleToken) &&
+                title.IndexOf(sessionTitleToken, StringComparison.OrdinalIgnoreCase) < 0)
+                return true;
 
             RECT rect;
             if (!GetWindowRect(hwnd, out rect))
@@ -417,12 +300,12 @@ public static class RdpWindowProbe
             if (area > bestArea)
             {
                 bestArea = area;
-                bestHandle = hwnd;
+                result.SessionHandle = hwnd;
             }
             return true;
         }, IntPtr.Zero);
 
-        return bestHandle;
+        return result;
     }
 
     public static WindowSnapshot CaptureWindow(IntPtr hwnd)
@@ -435,63 +318,14 @@ public static class RdpWindowProbe
         if (!GetClientRect(hwnd, out clientRect))
             throw new InvalidOperationException("GetClientRect failed.");
 
-        var visibleChildren = new List<WindowInfo>();
-        EnumChildWindows(hwnd, (childHwnd, _) =>
-        {
-            if (!IsWindowVisible(childHwnd))
-                return true;
-
-            RECT childRect;
-            if (!GetWindowRect(childHwnd, out childRect))
-                return true;
-
-            int width = Math.Max(0, childRect.Right - childRect.Left);
-            int height = Math.Max(0, childRect.Bottom - childRect.Top);
-            int area = width * height;
-            if (area == 0)
-                return true;
-
-            visibleChildren.Add(new WindowInfo
-            {
-                WindowClass = GetWindowClass(childHwnd),
-                Left = childRect.Left,
-                Top = childRect.Top,
-                Width = width,
-                Height = height,
-                Area = area
-            });
-            return true;
-        }, IntPtr.Zero);
-
-        var sortedChildren = visibleChildren.OrderByDescending(c => c.Area).ToList();
-
-        WindowInfo largestVisibleChild = sortedChildren.FirstOrDefault();
-
-        string childSummary = string.Join(" | ", sortedChildren
-            .Take(8)
-            .Select(c => string.Format("{0}:{1}x{2}@{3},{4}", c.WindowClass, c.Width, c.Height, c.Left, c.Top)));
-
         return new WindowSnapshot
         {
             Title = GetWindowCaption(hwnd),
-            WindowClass = GetWindowClass(hwnd),
             OuterWidth = Math.Max(0, outerRect.Right - outerRect.Left),
             OuterHeight = Math.Max(0, outerRect.Bottom - outerRect.Top),
             ClientWidth = Math.Max(0, clientRect.Right - clientRect.Left),
-            ClientHeight = Math.Max(0, clientRect.Bottom - clientRect.Top),
-            VisibleChildCount = visibleChildren.Count,
-            LargestVisibleChild = largestVisibleChild,
-            ChildSummary = childSummary
+            ClientHeight = Math.Max(0, clientRect.Bottom - clientRect.Top)
         };
-    }
-
-    public static void GetOuterSize(IntPtr hwnd, out int width, out int height)
-    {
-        RECT rect;
-        if (!GetWindowRect(hwnd, out rect))
-            throw new InvalidOperationException("GetWindowRect failed.");
-        width = Math.Max(0, rect.Right - rect.Left);
-        height = Math.Max(0, rect.Bottom - rect.Top);
     }
 
     public static void ResizeWindowKeepPosition(IntPtr hwnd, int width, int height)
@@ -524,22 +358,7 @@ if (-not ('RdpWindowProbe' -as [type])) {
     Add-Type -TypeDefinition $source -Language CSharp
 }
 
-if (-not ('RdpDpiAwareness' -as [type])) {
-    Add-Type -Namespace '' -Name 'RdpDpiAwareness' -MemberDefinition @"
-[System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-public static extern bool SetProcessDpiAwarenessContext(System.IntPtr ctx);
-[System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-public static extern System.IntPtr SetThreadDpiAwarenessContext(System.IntPtr ctx);
-"@
-}
-
-try {
-    $perMonitorV2 = [IntPtr]::new(-4)
-    $null = [RdpDpiAwareness]::SetProcessDpiAwarenessContext($perMonitorV2)
-    $null = [RdpDpiAwareness]::SetThreadDpiAwarenessContext($perMonitorV2)
-}
-catch {
-}
+$null = [RdpWindowProbe]::EnablePerMonitorV2DpiAwareness()
 
 $baseLines = [System.Collections.Generic.List[string]]::new([string[]]@(Get-Content -LiteralPath $BaseRdpPath -Encoding Unicode))
 Set-RdpSettingLine $baseLines 'redirectsmartcards:i:0'
@@ -557,81 +376,53 @@ if ([string]::IsNullOrEmpty($effectiveTargetIP)) {
         $effectiveTargetIP = $fullAddressLine.Substring('full address:s:'.Length)
     }
 }
-$probeRoot = $PSScriptRoot
+
+if (-not (Test-Path -LiteralPath $ProbeTempDir)) {
+    $null = New-Item -ItemType Directory -Path $ProbeTempDir
+}
+
 $results = [System.Collections.Generic.List[object]]::new()
 
-try {
-    foreach ($case in $cases) {
-        $probePath = Join-Path $probeRoot ("case-{0:00}.rdp" -f $case.CaseNumber)
-        $probeLines = [System.Collections.Generic.List[string]]::new($baseLines)
-        $probeWinposWidth = $case.WinposWidth + $ExtraChrome
-        $probeWinposHeight = $case.WinposHeight + $ExtraChrome
+foreach ($case in $cases) {
+    $probePath = Join-Path $ProbeTempDir ("case-{0:00}.rdp" -f $case.CaseNumber)
+    $probeLines = [System.Collections.Generic.List[string]]::new($baseLines)
+    $probeWinposWidth = $case.WinposWidth + $ExtraChrome
+    $probeWinposHeight = $case.WinposHeight + $ExtraChrome
 
-        Set-RdpSettingLine $probeLines "smart sizing:i:$($case.SmartSizing)"
-        Set-RdpSettingLine $probeLines 'screen mode id:i:1'  # always windowed; id=2 is fullscreen and makes window measurement meaningless
-        Set-RdpSettingLine $probeLines "winposstr:s:0,$($case.WinposShowCmd),0,0,$probeWinposWidth,$probeWinposHeight"
+    Set-RdpSettingLine $probeLines "smart sizing:i:$($case.SmartSizing)"
+    Set-RdpSettingLine $probeLines 'screen mode id:i:1'
+    Set-RdpSettingLine $probeLines "winposstr:s:0,$($case.WinposShowCmd),0,0,$probeWinposWidth,$probeWinposHeight"
 
-        $probeLines | Set-Content -LiteralPath $probePath -Encoding Unicode
+    $probeLines | Set-Content -LiteralPath $probePath -Encoding Unicode
 
+    $titleToken = [System.IO.Path]::GetFileNameWithoutExtension($probePath)
+    Write-Host ("[{0}/{1}] smart sizing={2}, winpos showCmd={3}, winpos={4}, smart_size_125={5}" -f $case.CaseNumber, $cases.Count, $case.SmartSizing, $case.WinposShowCmd, $case.WinposSpec, $case.SmartSize125)
+
+    $snapshot = $null
+    $readyWindow = $null
+    $errorText = ''
+    $seenTitlesText = ''
+
+    for ($caseAttempt = 1; $caseAttempt -le $RetryCount; $caseAttempt++) {
         $process = $null
         $readyWindow = $null
         $snapshot = $null
         $seenTitlesText = ''
         $errorText = ''
-        $titleToken = [System.IO.Path]::GetFileNameWithoutExtension($probePath)
-        Write-Host ("[{0}/{1}] smart sizing={2}, winpos showCmd={3}, winpos={4}, smart_size_125={5}" -f $case.CaseNumber, $cases.Count, $case.SmartSizing, $case.WinposShowCmd, $case.WinposSpec, $case.SmartSize125)
+        $isLastAttempt = $caseAttempt -ge $RetryCount
         try {
             $process = Start-Process -FilePath 'mstsc.exe' -ArgumentList "`"$probePath`"" -PassThru
             $readyWindow = Wait-ForProbeWindow -Process $process -TitleToken $titleToken
+
             if ($case.SmartSize125 -eq 'yes') {
-                $resizeHwnd = [IntPtr]::Zero
-                $preWidth = 0
-                $preHeight = 0
-                for ($resizeAttempt = 1; $resizeAttempt -le 10; $resizeAttempt++) {
-                    $resizeHwnd = [RdpWindowProbe]::FindBestWindowByTitleToken($titleToken, 0)
-                    if ($resizeHwnd -ne [IntPtr]::Zero) {
-                        try {
-                            [RdpWindowProbe]::GetOuterSize($resizeHwnd, [ref]$preWidth, [ref]$preHeight)
-                            break
-                        }
-                        catch {
-                            $resizeHwnd = [IntPtr]::Zero
-                        }
-                    }
-                    Start-Sleep -Milliseconds 300
-                }
-
-                if ($resizeHwnd -eq [IntPtr]::Zero) {
-                    throw "Unable to locate a stable mstsc window to resize for smart_size_125."
-                }
-
-                $targetOuterWidth = [int][Math]::Ceiling($preWidth * 1.25)
-                $targetOuterHeight = [int][Math]::Ceiling($preHeight * 1.25)
-                [RdpWindowProbe]::ResizeWindowKeepPosition($resizeHwnd, $targetOuterWidth, $targetOuterHeight)
-                Start-Sleep -Milliseconds ([Math]::Max(500, [int]($SettleMilliseconds / 2)))
+                $targetOuterWidth = [int][Math]::Ceiling($readyWindow.Snapshot.OuterWidth * 1.25)
+                $targetOuterHeight = [int][Math]::Ceiling($readyWindow.Snapshot.OuterHeight * 1.25)
+                [RdpWindowProbe]::ResizeWindowKeepPosition($readyWindow.Handle, $targetOuterWidth, $targetOuterHeight)
+                Start-Sleep -Milliseconds ([int]($SettleMilliseconds / 2))
+                $snapshot = [RdpWindowProbe]::CaptureWindow($readyWindow.Handle)
             }
-            for ($attempt = 1; $attempt -le 3; $attempt++) {
-                $hwnd = [RdpWindowProbe]::FindBestWindowByTitleToken($titleToken, 0)
-                if ($hwnd -eq [IntPtr]::Zero) {
-                    Start-Sleep -Milliseconds 300
-                    continue
-                }
-
-                try {
-                    $snapshot = [RdpWindowProbe]::CaptureWindow($hwnd)
-                    if (-not (Test-IsProbeWindowReady $snapshot.Title)) {
-                        $snapshot = $null
-                        Start-Sleep -Milliseconds 300
-                        continue
-                    }
-                    break
-                }
-                catch {
-                    if ($attempt -ge 3) {
-                        throw
-                    }
-                    Start-Sleep -Milliseconds 300
-                }
+            else {
+                $snapshot = $readyWindow.Snapshot
             }
         }
         catch {
@@ -643,48 +434,59 @@ try {
         }
         finally {
             Stop-MstscProcess $process
-            if (-not $KeepTempFiles) {
-                Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
-            }
         }
 
-        $results.Add([PSCustomObject]@{
-            TargetIP = $effectiveTargetIP
-            HostWindowsVersion = $hostWindowsVersion
-            SmartSizing = $case.SmartSizing
-            'sz*1.25' = $case.SmartSize125
-            WinposShowCmd = $case.WinposShowCmd
-            WinposWidth = $probeWinposWidth
-            WinposHeight = $probeWinposHeight
-            OuterWidth = Get-PropertyOrNull $snapshot 'OuterWidth'
-            OuterHeight = Get-PropertyOrNull $snapshot 'OuterHeight'
-            ClientWidth = Get-PropertyOrNull $snapshot 'ClientWidth'
-            ClientHeight = Get-PropertyOrNull $snapshot 'ClientHeight'
-            Error = $errorText
-            WindowTitle = if ($null -ne $snapshot) {
-                $readyWindow.SeenTitles
-            }
-            elseif ($null -ne $readyWindow) {
-                $readyWindow.SeenTitles
-            }
-            else {
-                $seenTitlesText
-            }
-        })
+        if ($null -ne $snapshot) { break }
+
+        if ($isLastAttempt) {
+            Write-Warning "Case $($case.CaseNumber) failed after $RetryCount attempts: $errorText"
+        }
+        else {
+            Write-Warning "Case $($case.CaseNumber) attempt $caseAttempt/$RetryCount failed: $errorText. Retrying..."
+        }
     }
 
-    $outputDir = Split-Path -Parent $OutputCsvPath
-    if ($outputDir -and -not (Test-Path -LiteralPath $outputDir)) {
-        $null = New-Item -ItemType Directory -Path $outputDir
+    if (-not $KeepTempFiles) {
+        Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
     }
 
-    Select-ProbeOutput -Results $results | Export-Csv -LiteralPath $OutputCsvPath -NoTypeInformation
-    Select-ProbeOutput -Results $results -ForConsole |
-        Format-Table -AutoSize
-    Write-Host "Wrote probe results to $OutputCsvPath"
-    if ($KeepTempFiles) {
-        Write-Host "Kept generated .rdp files in $probeRoot"
+    $windowTitle = if ($null -ne $readyWindow) { $readyWindow.SeenTitles } else { $seenTitlesText }
+    $outerWidth = $null
+    $outerHeight = $null
+    $clientWidth = $null
+    $clientHeight = $null
+    if ($snapshot) {
+        $outerWidth = $snapshot.OuterWidth
+        $outerHeight = $snapshot.OuterHeight
+        $clientWidth = $snapshot.ClientWidth
+        $clientHeight = $snapshot.ClientHeight
     }
+
+    $results.Add([PSCustomObject]@{
+        TargetIP = $effectiveTargetIP
+        HostWindowsVersion = $hostWindowsVersion
+        SmartSizing = $case.SmartSizing
+        'sz*1.25' = $case.SmartSize125
+        WinposShowCmd = $case.WinposShowCmd
+        WinposWidth = $probeWinposWidth
+        WinposHeight = $probeWinposHeight
+        OuterWidth = $outerWidth
+        OuterHeight = $outerHeight
+        ClientWidth = $clientWidth
+        ClientHeight = $clientHeight
+        WindowTitle = $windowTitle
+        Error = $errorText
+    })
 }
-finally {
+
+$outputDir = Split-Path -Parent $OutputCsvPath
+if ($outputDir -and -not (Test-Path -LiteralPath $outputDir)) {
+    $null = New-Item -ItemType Directory -Path $outputDir
+}
+
+$results | Export-Csv -LiteralPath $OutputCsvPath -NoTypeInformation
+$results | Format-Table -AutoSize
+Write-Host "Wrote probe results to $OutputCsvPath"
+if ($KeepTempFiles) {
+    Write-Host "Kept generated .rdp files in $ProbeTempDir"
 }
