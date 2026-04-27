@@ -6,11 +6,8 @@
 *.suo
 *.binlog
 [Tt]est[Rr]esult*/
-Thumbs.db
-[Dd]esktop.ini
 *.swp
 publish/
-.claude/settings.local.json
 .playwright-mcp/
 .dotnet-cli/
 *.log
@@ -20,4 +17,4 @@ publish/
 project.lock.json
 packages/
 .dotnet/
-*.diff
+rdp_window_probe/*.csv

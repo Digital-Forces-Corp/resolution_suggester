@@ -21,14 +21,8 @@ static class ProcessRunner
         using var process = Process.Start(psi) ?? throw new InvalidOperationException($"Failed to start process: {exePath}");
 
         if (stdinInput != null)
-        {
             process.StandardInput.Write(stdinInput);
-            process.StandardInput.Close();
-        }
-        else
-        {
-            process.StandardInput.Close();
-        }
+        process.StandardInput.Close();
 
         // Read both streams asynchronously to avoid pipe-buffer deadlock
         var stderrTask = Task.Run(() => process.StandardError.ReadToEnd());
