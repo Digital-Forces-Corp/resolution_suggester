@@ -2,6 +2,11 @@ param(
     [string]$BaseRdpPath = (Join-Path $PSScriptRoot 'ticket_highest_speed.rdp'),
     [string]$OutputCsvPath = (Join-Path $PSScriptRoot ("rdp-window-probe-{0:yyyyMMdd-HHmmss}.csv" -f (Get-Date))),
     [string]$TargetAddress = '',
+    [switch]$SingleCase,
+    [int]$SmartSizing = 0,
+    [int]$WinposShowCmd = 1,
+    [string]$WinposSize = '800x600',
+    [string]$SmartSize125 = 'no',
     [int[]]$SmartSizingValues = @(0, 1),
     # screen mode id is always 1 (windowed); id=2 is fullscreen and takes over the whole screen, making window measurement meaningless
     [int[]]$WinposShowCmdValues = @(1, 3),
@@ -145,7 +150,12 @@ if (-not (Test-Path -LiteralPath $BaseRdpPath)) {
     throw "Base RDP file not found: $BaseRdpPath"
 }
 
-$cases = @(Get-ProbeCases -SmartSizingList $SmartSizingValues -WinposShowCmdList $WinposShowCmdValues -WinposSizeList $WinposSizes -SmartSize125List $SmartSize125Values)
+if ($SingleCase) {
+    $cases = @(Get-ProbeCases -SmartSizingList @($SmartSizing) -WinposShowCmdList @($WinposShowCmd) -WinposSizeList @($WinposSize) -SmartSize125List @($SmartSize125))
+}
+else {
+    $cases = @(Get-ProbeCases -SmartSizingList $SmartSizingValues -WinposShowCmdList $WinposShowCmdValues -WinposSizeList $WinposSizes -SmartSize125List $SmartSize125Values)
+}
 
 if ($ListOnly) {
     $cases | Format-Table SmartSizing, WinposShowCmd, WinposSpec, SmartSize125 -AutoSize
@@ -381,9 +391,8 @@ if (-not (Test-Path -LiteralPath $ProbeTempDir)) {
     $null = New-Item -ItemType Directory -Path $ProbeTempDir
 }
 
-$results = [System.Collections.Generic.List[object]]::new()
-
-foreach ($case in $cases) {
+& {
+    foreach ($case in $cases) {
     $probePath = Join-Path $ProbeTempDir ("case-{0:00}.rdp" -f $case.CaseNumber)
     $probeLines = [System.Collections.Generic.List[string]]::new($baseLines)
     $probeWinposWidth = $case.WinposWidth + $ExtraChrome
@@ -396,7 +405,6 @@ foreach ($case in $cases) {
     $probeLines | Set-Content -LiteralPath $probePath -Encoding Unicode
 
     $titleToken = [System.IO.Path]::GetFileNameWithoutExtension($probePath)
-    Write-Host ("[{0}/{1}] smart sizing={2}, winpos showCmd={3}, winpos={4}, smart_size_125={5}" -f $case.CaseNumber, $cases.Count, $case.SmartSizing, $case.WinposShowCmd, $case.WinposSpec, $case.SmartSize125)
 
     $snapshot = $null
     $readyWindow = $null
@@ -462,7 +470,7 @@ foreach ($case in $cases) {
         $clientHeight = $snapshot.ClientHeight
     }
 
-    $results.Add([PSCustomObject]@{
+    [PSCustomObject]@{
         TargetIP = $effectiveTargetIP
         HostWindowsVersion = $hostWindowsVersion
         SmartSizing = $case.SmartSizing
@@ -476,8 +484,9 @@ foreach ($case in $cases) {
         ClientHeight = $clientHeight
         WindowTitle = $windowTitle
         Error = $errorText
-    })
-}
+    }
+    }
+} | Tee-Object -Variable results | Format-Table -AutoSize
 
 $outputDir = Split-Path -Parent $OutputCsvPath
 if ($outputDir -and -not (Test-Path -LiteralPath $outputDir)) {
@@ -485,7 +494,6 @@ if ($outputDir -and -not (Test-Path -LiteralPath $outputDir)) {
 }
 
 $results | Export-Csv -LiteralPath $OutputCsvPath -NoTypeInformation
-$results | Format-Table -AutoSize
 Write-Host "Wrote probe results to $OutputCsvPath"
 if ($KeepTempFiles) {
     Write-Host "Kept generated .rdp files in $ProbeTempDir"
