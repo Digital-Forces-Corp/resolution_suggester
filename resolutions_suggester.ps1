@@ -294,7 +294,7 @@ if ($InputArgs.Count -eq 0) {
 # Resolve .rdp file paths
 $rdpPaths = @()
 foreach ($pathArg in $pathArgs) {
-    $resolved = [System.IO.Path]::GetFullPath($pathArg)
+    $resolved = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($pathArg)
     if (Test-Path $resolved -PathType Container) {
         $rdpPaths += @(Get-ChildItem $resolved -Filter '*.rdp' | Select-Object -ExpandProperty FullName)
     } else {
