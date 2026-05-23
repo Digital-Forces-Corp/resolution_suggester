@@ -17,4 +17,3 @@ publish/
 project.lock.json
 packages/
 .dotnet/
-rdp_window_probe/*.csv

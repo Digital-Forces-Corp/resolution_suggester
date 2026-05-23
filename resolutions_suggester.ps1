@@ -3,7 +3,7 @@ param(
     [string[]]$InputArgs
 )
 
-$Version = '2026-04-16T11:15-05:00'
+$Version = '2026-05-22T19:12-05:00'
 $MaxZoom = 2
 $TaskbarHeightAt96Dpi = 48
 $ChromeHeightAt96Dpi = 55.0 / 1.5

@@ -160,3 +160,7 @@ The program:
 5. Computes the supported whole-number zoom factors for each monitor resolution, from 100% through the largest value where `N * RDP height + chrome height <= monitor resolution height`, capped at `MaxZoom` (currently 2)
 6. Computes a taskbar-fit zoom for each monitor resolution: the fractional zoom where `base height * zoom + decoration height + 48 * DPI scale = monitor height`, leaving exactly 48 DPI-scaled pixels for the Windows taskbar
 7. Calculates area usage percentages and ranks results
+
+## Related Projects
+
+- **RDP Window Probe**: For automated RDP client behavior probing, dynamic resizing diagnostics, and setting override permissions to suppress authorization dialogs, see the standalone repository located at `C:\dfc\gh\rdp_window_probe`.
